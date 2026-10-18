@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>rdp-go · 远程桌面测试</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div><strong>rdp-go</strong><span class="sub">远程桌面测试</span></div><div class="tools"><span id="status" role="status">正在接收画面…</span><label for="resolution">分辨率</label><select id="resolution" disabled><option value="1280x720">1280 × 720</option><option value="1600x900">1600 × 900</option><option value="1920x1080" selected>1920 × 1080</option><option value="2560x1440">2560 × 1440</option></select><button id="apply-resolution" disabled>应用</button><button id="fullscreen">全屏</button><button id="disconnect" class="danger">断开连接</button></div></header>
+<div id="resize-message" role="status">等待服务器提供分辨率调整能力…</div>
+<div class="audio-tools"><button id="audio-toggle" aria-pressed="false" disabled>开启声音</button><label for="audio-volume">音量</label><input id="audio-volume" type="range" min="0" max="100" value="50" aria-label="远程声音音量" disabled><span id="audio-message" role="status" data-state="off">此连接未启用声音</span></div>
+<div class="audio-tools"><button id="microphone-toggle" aria-pressed="false" disabled>开启麦克风</button><span id="microphone-message" role="status" data-state="off">此连接未启用麦克风</span></div>
+<details id="text-panel"><summary>中文输入与文本剪贴板</summary><div class="text-tools"><label for="text-value">先在远程选中输入位置，再在这里输入中文或粘贴文本。</label><textarea id="text-value" rows="3" maxlength="262144" spellcheck="false" autocomplete="off" placeholder="支持中文、表情与多行文本"></textarea><div class="text-actions"><button id="send-text" disabled>输入到远程</button><button id="send-clipboard" disabled>发送到远程剪贴板</button><button id="get-clipboard" disabled>读取远程剪贴板</button><button id="copy-text">复制文本到本机</button></div><span id="text-message" role="status">输入适合短文本；长文本请发送到剪贴板，再在远程粘贴。</span></div></details>
+<details id="rich-panel"><summary>图片与富文本剪贴板</summary>
+<div class="text-tools">
+<p class="rich-help">先读取到预览，再选择发送或复制。发送到远端后，请在远端应用中粘贴。</p>
+<div class="text-actions"><label for="rich-format">内容类型</label><select id="rich-format"><option value="image">图片</option><option value="html">富文本</option></select><button id="rich-import" disabled>从本机剪贴板读取</button><label class="rich-file-label">选择 PNG 图片<input id="rich-file" type="file" accept="image/png" disabled></label></div>
+<div class="text-actions"><button id="rich-send" disabled>发送到远端</button><button id="rich-get" disabled>读取远端</button><button id="rich-copy" disabled>复制到本机</button><button id="rich-clear" disabled>清除预览</button></div>
+<div id="rich-preview" hidden><img id="rich-image" alt="剪贴板图片预览" hidden><pre id="rich-plain"></pre><details hidden><summary>查看 HTML 源内容</summary><textarea id="rich-source" rows="4" readonly aria-label="富文本 HTML 源内容"></textarea></details></div>
+<span id="rich-message" role="status">只在点击时访问剪贴板；富文本在此显示纯文本和源内容，不加载其中的外部内容。</span>
+</div></details>
+<details id="files-panel"><summary>下载远端文件</summary><div class="text-tools">
+<p>先在远端文件夹中复制文件或文件夹，再点击读取。最多 128 项、合计 64 MB，完整接收后保存为 ZIP。</p>
+<div class="text-actions"><button id="files-get" disabled>读取远端文件</button><button id="files-cancel" disabled>取消 / 清除下载</button><a id="files-save" hidden download="rdp-go-files.zip">保存 ZIP</a></div>
+<progress id="files-progress" max="1" value="0" aria-label="文件接收进度"></progress><span id="files-message" role="status">启动时启用文件下载后可使用此功能</span>
+</div></details>
+<details id="upload-panel"><summary>发送本机文件到远端</summary><div class="text-tools">
+<p>选择文件后点击发送，再在远端目标文件夹按 Ctrl+V。最多 128 项、合计 64 MB；文件夹选择会保留文件的相对路径，空文件夹不会被浏览器选入。</p>
+<div class="text-actions"><label class="rich-file-label">选择文件<input id="upload-files" type="file" multiple disabled></label><label class="rich-file-label">选择文件夹<input id="upload-folder" type="file" webkitdirectory multiple disabled></label><button id="upload-send" disabled>发送到远端剪贴板</button><button id="upload-clear" disabled>取消 / 清除选择</button></div>
+<pre id="upload-list"></pre><progress id="upload-progress" max="1" value="0" aria-label="文件上传进度"></progress><span id="upload-message" role="status">连接时启用文件传输后可使用此功能</span>
+</div></details>
+<details id="drive-panel" hidden><summary>共享本机目录</summary><div class="text-tools"><span id="drive-message" role="status"></span><p>在远端资源管理器地址栏输入：<code id="drive-path"></code></p><p>共享范围与读写权限由启动查看器时的设置决定。断开连接会关闭共享。</p></div></details>
+<div id="remoteapp-tools" hidden><strong>远程应用</strong><button id="app-launch" disabled>再次启动应用</button><select id="app-windows" aria-label="远程窗口"></select><button data-app-action="activate">切换窗口</button><button data-app-action="move">移动</button><button data-app-action="size">调整大小</button><button data-app-action="minimize">最小化</button><button data-app-action="maximize">最大化</button><button data-app-action="restore">还原</button><button data-app-action="cloak">隐藏窗口</button><button data-app-action="uncloak">显示窗口</button><button data-app-action="close">关闭窗口</button><span id="app-message" role="status"></span></div>
+<section id="notify-tools" hidden aria-label="远程通知区域"><div class="notify-heading"><strong>远程通知区域</strong><button id="notify-prev" disabled>上一页</button><span id="notify-page"></span><button id="notify-next" disabled>下一页</button><span id="notify-message" role="status"></span></div><div id="notify-icons"></div><div id="notify-balloon" hidden><strong id="notify-title"></strong><p id="notify-text"></p><button id="notify-open">打开通知</button><button id="notify-dismiss">关闭提示</button></div></section>
+<main><div class="screen"><canvas id="desktop" width="1280" height="720" tabindex="0" aria-label="远程桌面，点击后可使用键盘和鼠标"></canvas><div id="waiting">正在接收远程画面…</div></div></main>
+<footer><span id="hint">点击画面开始操作 · 移出焦点会释放按键</span><span>中文与剪贴板请使用上方文本面板 · 部分组合键由浏览器保留</span></footer>
+<script src="/audio.js"></script>
+<script src="/capture.js"></script>
+<script src="/clipboard.js"></script>
+<script src="/files.js"></script>
+<script src="/upload.js"></script>
+<script src="/remoteapp.js"></script>
+<script src="/notifications.js"></script>
+<script src="/app.js"></script>
+</body></html>

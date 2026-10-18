@@ -1,0 +1,20 @@
+# Generated binaries and local verification artifacts
+/bin/
+/work/
+/dist/
+*.exe
+*.test
+coverage.out
+coverage.*.out
+*.prof
+
+# Local configuration
+.env
+.env.*
+!.env.example
+go.work
+go.work.sum
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
