@@ -179,6 +179,10 @@ func (i *WindowsInput) Focus() (TextFocus, error) {
 // composition. DecodeWindowsKey and keyboard.Router handle physical identity
 // and held-key pairing; do not route again if delivery becomes uncertain.
 func (i *WindowsInput) Key(t TextFocus, m WindowsKeyMessage) (bool, error) {
+	return i.key(t, m, nil)
+}
+
+func (i *WindowsInput) key(t TextFocus, m WindowsKeyMessage, state *WindowsKeyboardState) (bool, error) {
 	if _, _, err := keySlots(m); err != nil {
 		return false, err
 	}
@@ -204,7 +208,14 @@ func (i *WindowsInput) Key(t TextFocus, m WindowsKeyMessage) (bool, error) {
 	if err := i.document.pendingCommit(); err != nil {
 		return false, err
 	}
-	handled, err := filterKey(i.keys, m, func() error { return i.check(t) })
+	filter := func() (bool, error) { return filterKey(i.keys, m, func() error { return i.check(t) }) }
+	var handled bool
+	var err error
+	if state == nil {
+		handled, err = filter()
+	} else {
+		handled, err = withKeyboardState(state, filter)
+	}
 	if err != nil {
 		return false, i.stop(err)
 	}
