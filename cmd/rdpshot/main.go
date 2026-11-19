@@ -31,7 +31,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	user := f.String("user", "", "account name")
 	domain := f.String("domain", "", "domain or computer name")
 	pin := f.String("cert-sha256", "", "independently verified leaf SHA-256; otherwise system CA verification")
-	passwordEnv := f.String("password-env", "OPENRDP_PASSWORD", "local password environment variable")
+	passwordEnv := f.String("password-env", "RDPGO_PASSWORD", "local password environment variable")
 	redirectFile := f.String("redirection-config", "", "explicit local JSON hop plan; fresh capture window after each target switch")
 	output := f.String("out", "", "PNG file to create (must not exist)")
 	timeout := f.Duration("timeout", 30*time.Second, "total connection/capture timeout")

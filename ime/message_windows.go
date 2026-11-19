@@ -43,6 +43,27 @@ func (a *WindowsAdapter) PeekMessage(remove bool) (WindowsMessage, bool, error) 
 }
 
 func (a *WindowsAdapter) message(peek, remove bool) (WindowsMessage, bool, error) {
+	return a.messageQueue(peek, remove, 0)
+}
+
+// PeekMaintenanceMessage removes one message through ITfMessagePump, leaving
+// hardware keyboard input queued. Posted messages (including translated chars
+// and explicitly posted keys), mouse input, paint, timers, hotkeys and sent
+// messages remain serviceable. No HWND or message-number filter is applied:
+// posted character messages keep their order relative to private boundaries.
+// Like PeekMessage, presence includes WM_QUIT. Return to normal Get/Peek when
+// the current input has completed; this is not a replacement for a full loop.
+//
+// In particular, removing later key messages before translating VK_PACKET
+// overwrites Windows' transient Unicode packet state. A saved MSG and keyboard
+// snapshot alone cannot preserve that state. Hosts must hold later keys in the
+// native queue until the current packet has been filtered and translated.
+func (a *WindowsAdapter) PeekMaintenanceMessage() (WindowsMessage, bool, error) {
+	// PM_QS_POSTMESSAGE | PM_QS_PAINT | PM_QS_SENDMESSAGE | (QS_MOUSE << 16)
+	return a.messageQueue(true, true, 0x00fe0000)
+}
+
+func (a *WindowsAdapter) messageQueue(peek, remove bool, categories uintptr) (WindowsMessage, bool, error) {
 	if a == nil {
 		return WindowsMessage{}, false, rail.ErrInvalid
 	}
@@ -54,7 +75,7 @@ func (a *WindowsAdapter) message(peek, remove bool) (WindowsMessage, bool, error
 	if err != nil {
 		return WindowsMessage{}, false, err
 	}
-	m, ok, err := readWindowsMessage(pump, peek, remove)
+	m, ok, err := readWindowsMessageQueue(pump, peek, remove, categories)
 	// Release can reenter host code too. Keep the guard through Release and
 	// recheck window identity afterwards; no message from a retired host escapes.
 	comCall(pump, 2)
@@ -68,13 +89,17 @@ func (a *WindowsAdapter) message(peek, remove bool) (WindowsMessage, bool, error
 }
 
 func readWindowsMessage(pump *comObject, peek, remove bool) (WindowsMessage, bool, error) {
+	return readWindowsMessageQueue(pump, peek, remove, 0)
+}
+
+func readWindowsMessageQueue(pump *comObject, peek, remove bool, categories uintptr) (WindowsMessage, bool, error) {
 	var raw nativeMessage
 	var result int32
 	var hr uintptr
 	if peek {
-		var flags uintptr
+		flags := categories
 		if remove {
-			flags = 1
+			flags |= 1
 		}
 		hr = comCall(pump, 5, uintptr(unsafe.Pointer(&raw)), 0, 0, 0, flags, uintptr(unsafe.Pointer(&result)))
 	} else {

@@ -402,7 +402,7 @@ func writeHTTPRequest(w io.Writer, method, host, id, authorization string) error
 func writeHTTPHeader(w io.Writer, method, host, id, authorization string, chunked bool) error {
 	// All variable fields have already been validated or locally generated.
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: openrdp/1.0\r\nConnection: Keep-Alive\r\nCache-Control: no-cache\r\nPragma: no-cache\r\nAccept: */*\r\nRDG-Connection-Id: %s\r\n", method, gatewayPath, host, id)
+	fmt.Fprintf(&b, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: rdpgo/1.0\r\nConnection: Keep-Alive\r\nCache-Control: no-cache\r\nPragma: no-cache\r\nAccept: */*\r\nRDG-Connection-Id: %s\r\n", method, gatewayPath, host, id)
 	if authorization != "" {
 		fmt.Fprintf(&b, "Authorization: %s\r\n", authorization)
 	}

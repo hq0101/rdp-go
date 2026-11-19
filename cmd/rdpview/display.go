@@ -210,7 +210,7 @@ func (v *viewer) serveResize(w http.ResponseWriter, r *http.Request) {
 	}
 	v.frameMu.Lock()
 	v.expireResizeLocked(time.Now())
-	if !v.active || v.reconnection.Phase != "connected" || v.resize.Pending || r.Header.Get("X-OpenRDP-Generation") != strconv.FormatUint(v.generation, 10) {
+	if !v.active || v.reconnection.Phase != "connected" || v.resize.Pending || r.Header.Get("X-RdpGo-Generation") != strconv.FormatUint(v.generation, 10) {
 		v.frameMu.Unlock()
 		http.Error(w, "session changed or display request pending", 409)
 		return

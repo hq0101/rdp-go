@@ -1,5 +1,5 @@
 'use strict';
-globalThis.OpenRDPFiles=class {
+globalThis.RdpGoFiles=class {
  constructor({request,document:doc=globalThis.document}) {
   this.request=request;this.state={};this.seq=0;this.pending=null;this.url=null;this.dead=false;
   this.e={};for(const id of ['files-get','files-cancel','files-save','files-message','files-progress'])this.e[id]=doc.getElementById(id);
@@ -23,12 +23,12 @@ globalThis.OpenRDPFiles=class {
  message(s){this.e['files-message'].textContent=s;}
  current(op){return !this.dead&&this.pending===op&&op.seq===this.seq&&op.generation===this.state.generation&&this.state.active&&this.state.phase==='connected';}
  async call(op,path,options={}) {
-  const r=await this.request(path,{...options,signal:op.controller.signal,headers:{...options.headers,'X-OpenRDP-Generation':String(op.generation)}});
-  if(r.headers.get('X-OpenRDP-Generation')!==String(op.generation))throw Object.assign(new Error('connection changed'),{status:409});return r;
+  const r=await this.request(path,{...options,signal:op.controller.signal,headers:{...options.headers,'X-RdpGo-Generation':String(op.generation)}});
+  if(r.headers.get('X-RdpGo-Generation')!==String(op.generation))throw Object.assign(new Error('connection changed'),{status:409});return r;
  }
  cancelRemote(op){
   if(!op?.id)return;
-  this.request('/clipboard/files',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(op.generation)},body:JSON.stringify({action:'cancel',id:op.id})}).catch(()=>{});
+  this.request('/clipboard/files',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(op.generation)},body:JSON.stringify({action:'cancel',id:op.id})}).catch(()=>{});
  }
  invalidate(){
   const op=this.pending;++this.seq;this.pending=null;

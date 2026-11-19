@@ -1,0 +1,236 @@
+package nativeview
+
+import (
+	"errors"
+	"image"
+	"syscall"
+	"unsafe"
+)
+
+const overlappedWindow = uint32(0x00cf0000)
+
+var (
+	getPlacement      = user32.NewProc("GetWindowPlacement")
+	setPlacement      = user32.NewProc("SetWindowPlacement")
+	monitorFromWindow = user32.NewProc("MonitorFromWindow")
+	getMonitorInfo    = user32.NewProc("GetMonitorInfoW")
+	clearLastError    = kernel32.NewProc("SetLastError")
+)
+
+type windowPlacement struct {
+	Length, Flags, ShowCmd   uint32
+	MinPosition, MaxPosition winPoint
+	NormalPosition           winRect
+}
+
+type frameSnapshot struct {
+	style     uint32
+	placement windowPlacement
+}
+
+// Window placement uses workspace coordinates, whereas monitor bounds use
+// screen coordinates. Keep them distinct and restore via SetWindowPlacement.
+type windowFrame interface {
+	snapshot() (frameSnapshot, error)
+	monitor() (winRect, error)
+	style(uint32) error
+	place(windowPlacement) error
+	position(*winRect) error // nil recalculates the frame without moving it
+}
+
+type fullscreenState struct {
+	active bool
+	saved  frameSnapshot
+}
+
+func restoreFrame(api windowFrame, s frameSnapshot) error {
+	// Attempt every restoration step even after one fails; the caller reports
+	// both the original failure and all rollback failures before closing.
+	err := api.style(s.style)
+	err = errors.Join(err, api.place(s.placement))
+	return errors.Join(err, api.position(nil))
+}
+
+func (s *fullscreenState) set(api windowFrame, enabled bool) error {
+	if enabled == s.active {
+		return nil
+	}
+	before, err := api.snapshot()
+	if err != nil {
+		return err
+	}
+	if enabled {
+		r, err := api.monitor()
+		if err != nil {
+			return err
+		}
+		if err = api.style(before.style &^ overlappedWindow); err != nil {
+			return errors.Join(err, restoreFrame(api, before))
+		}
+		if err = api.position(&r); err != nil {
+			return errors.Join(err, restoreFrame(api, before))
+		}
+		s.saved = before
+	} else if err = restoreFrame(api, s.saved); err != nil {
+		return errors.Join(err, restoreFrame(api, before))
+	}
+	s.active = enabled
+	return nil
+}
+
+type nativeFrame uintptr
+
+func styleProc(set bool) *syscall.LazyProc {
+	name := "GetWindowLongPtrW"
+	if set {
+		name = "SetWindowLongPtrW"
+	}
+	if unsafe.Sizeof(uintptr(0)) == 4 {
+		name = "GetWindowLongW"
+		if set {
+			name = "SetWindowLongW"
+		}
+	}
+	return user32.NewProc(name)
+}
+
+func (hwnd nativeFrame) snapshot() (frameSnapshot, error) {
+	p := windowPlacement{Length: uint32(unsafe.Sizeof(windowPlacement{}))}
+	if ok, _, err := getPlacement.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&p))); ok == 0 {
+		return frameSnapshot{}, nativeError("GetWindowPlacement", err)
+	}
+	get := styleProc(false)
+	if err := get.Find(); err != nil {
+		return frameSnapshot{}, err
+	}
+	clearLastError.Call(0)
+	style, _, err := get.Call(uintptr(hwnd), signed(-16))
+	if style == 0 && err != syscall.Errno(0) {
+		return frameSnapshot{}, nativeError("GetWindowLongPtr", err)
+	}
+	return frameSnapshot{uint32(style), p}, nil
+}
+
+func (hwnd nativeFrame) monitor() (winRect, error) {
+	monitor, _, err := monitorFromWindow.Call(uintptr(hwnd), 2) // nearest monitor
+	if monitor == 0 {
+		return winRect{}, nativeError("MonitorFromWindow", err)
+	}
+	var info struct {
+		Size          uint32
+		Monitor, Work winRect
+		Flags         uint32
+	}
+	info.Size = uint32(unsafe.Sizeof(info))
+	if ok, _, err := getMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
+		return winRect{}, nativeError("GetMonitorInfo", err)
+	}
+	if !validRect(info.Monitor) {
+		return winRect{}, ErrInvalid
+	}
+	return info.Monitor, nil
+}
+
+func (hwnd nativeFrame) style(style uint32) error {
+	set := styleProc(true)
+	if err := set.Find(); err != nil {
+		return err
+	}
+	clearLastError.Call(0)
+	previous, _, err := set.Call(uintptr(hwnd), signed(-16), uintptr(style))
+	if previous == 0 && err != syscall.Errno(0) {
+		return nativeError("SetWindowLongPtr", err)
+	}
+	return nil
+}
+
+func (hwnd nativeFrame) place(p windowPlacement) error {
+	p.Length = uint32(unsafe.Sizeof(p))
+	if ok, _, err := setPlacement.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&p))); ok == 0 {
+		return nativeError("SetWindowPlacement", err)
+	}
+	return nil
+}
+
+func (hwnd nativeFrame) position(r *winRect) error {
+	flags := uintptr(0x234) // NOZORDER | NOACTIVATE | FRAMECHANGED | NOOWNERZORDER
+	var rect winRect
+	if r == nil {
+		flags |= 3
+	} else {
+		rect = *r
+	}
+	if ok, _, err := setWindowPos.Call(uintptr(hwnd), 0, signed(rect.Left), signed(rect.Top), signed(rect.Right-rect.Left), signed(rect.Bottom-rect.Top), flags); ok == 0 {
+		return nativeError("SetWindowPos", err)
+	}
+	return nil
+}
+
+func (w *desktopWindow) applyWindowMode() error {
+	api := nativeFrame(w.hwnd)
+	if w.toggleFullscreen {
+		w.toggleFullscreen = false
+		if err := w.fullscreen.set(api, !w.fullscreen.active); err != nil {
+			return err
+		}
+		// The transition has already applied the complete placement. Discard any
+		// intermediate WM_DPICHANGED suggested rectangle generated by it.
+		w.dpiRect = nil
+		w.refitFullscreen = false
+	}
+	if w.fullscreen.active && (w.refitFullscreen || w.dpiRect != nil) {
+		w.refitFullscreen, w.dpiRect = false, nil
+		r, err := api.monitor()
+		if err != nil {
+			return err
+		}
+		return api.position(&r)
+	}
+	w.refitFullscreen = false
+	if w.dpiRect != nil {
+		r := *w.dpiRect
+		w.dpiRect = nil
+		if validRect(r) {
+			if ok, _, err := setWindowPos.Call(w.hwnd, 0, signed(r.Left), signed(r.Top), signed(r.Right-r.Left), signed(r.Bottom-r.Top), 0x14); ok == 0 {
+				return nativeError("SetWindowPos", err)
+			}
+		}
+	}
+	return nil
+}
+
+// The full-screen button occupies the existing local status row, outside the
+// remote viewport and IME candidate controls. It is usable before logon too.
+func (w *desktopWindow) fullscreenButton() image.Rectangle {
+	h := int(w.rowHeight)
+	if h <= 0 || w.client.Dy() < h {
+		return image.Rectangle{}
+	}
+	width := min(w.client.Dx(), 7*h)
+	return image.Rect(w.client.Max.X-width, w.client.Max.Y-h, w.client.Max.X, w.client.Max.Y)
+}
+
+func (w *desktopWindow) fullscreenMouse(message uint32, p image.Point) bool {
+	if w.pressed[0] || w.pressed[1] || w.pressed[2] {
+		return false
+	}
+	inside := p.In(w.fullscreenButton())
+	if w.fullscreenPressed {
+		if message == 0x202 {
+			w.fullscreenPressed, w.captured = false, false
+			releaseCapture.Call()
+			if inside {
+				w.toggleFullscreen = !w.toggleFullscreen
+			}
+		}
+		return true
+	}
+	if !inside {
+		return false
+	}
+	if message == 0x201 {
+		w.fullscreenPressed, w.captured = true, true
+		setCapture.Call(w.hwnd)
+	}
+	return true
+}

@@ -181,12 +181,12 @@ func uploadError(w http.ResponseWriter, err error) {
 }
 
 func (v *viewer) serveClipboardUpload(w http.ResponseWriter, r *http.Request) {
-	generation := r.Header.Get("X-OpenRDP-Generation")
+	generation := r.Header.Get("X-RdpGo-Generation")
 	if !v.clipboardGeneration(generation) {
 		uploadError(w, errConnectionChanged)
 		return
 	}
-	w.Header().Set("X-OpenRDP-Generation", generation)
+	w.Header().Set("X-RdpGo-Generation", generation)
 	if r.URL.Path == "/clipboard/upload/data" {
 		v.serveUploadChunk(w, r, generation)
 		return
@@ -318,7 +318,7 @@ func (v *viewer) createUpload(w http.ResponseWriter, r *http.Request, generation
 	v.uploadJob = j
 	unlock()
 	go v.runUpload(j)
-	j.root, err = os.MkdirTemp("", "openrdp-upload-")
+	j.root, err = os.MkdirTemp("", "rdpgo-upload-")
 	if err == nil {
 		var dir *os.File
 		dir, err = os.Open(j.root)

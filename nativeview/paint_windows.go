@@ -222,11 +222,8 @@ func (w *desktopWindow) paint(dc uintptr) error {
 			}
 			w.rasterPixels, w.rasterSource, w.rasterPoint = pixels, w.desktop, w.lastPointer
 		}
-		pixels := w.rasterPixels
-		header := bitmapHeader{Size: 40, Width: int32(w.desktop.image.Rect.Dx()), Height: -int32(w.desktop.image.Rect.Dy()), Planes: 1, Bits: 32}
-		result, _, e := stretchDIBits.Call(dc, uintptr(v.Min.X), uintptr(v.Min.Y), uintptr(v.Dx()), uintptr(v.Dy()), 0, 0, uintptr(header.Width), uintptr(-header.Height), uintptr(unsafe.Pointer(&pixels[0])), uintptr(unsafe.Pointer(&header)), 0, 0x00cc0020)
-		if int32(result) == -1 {
-			return nativeError("StretchDIBits", e)
+		if err := drawDesktopBitmap(dc, v, w.desktop.image.Rect.Size(), w.rasterPixels, stretchPixels); err != nil {
+			return err
 		}
 	} else {
 		w.rasterSource, w.rasterPixels = nil, nil
@@ -248,7 +245,7 @@ func (w *desktopWindow) paint(dc uintptr) error {
 		// Do not hide an incomplete replacement or unsupported behavior provider.
 		complete := last-first <= 9 && last > first && c.SupportsBehavior
 		for index := first; index < min(last, first+9); index++ {
-			box := winRect{4, y, all.Right - 4, min(all.Bottom, y+w.rowHeight)}
+			box := winRect{4, y, all.Right - 4, min(all.Bottom-w.rowHeight, y+w.rowHeight)}
 			if !validRect(box) || box.Bottom-box.Top < w.rowHeight {
 				complete = false
 				if !validRect(box) {
@@ -283,7 +280,7 @@ func (w *desktopWindow) paint(dc uintptr) error {
 			actions := []actionLabel{{"Previous", ime.CandidateAction{Kind: ime.CandidateSelectPage, Index: c.CurrentPage - 1}, c.CurrentPage > 0}, {"Next", ime.CandidateAction{Kind: ime.CandidateSelectPage, Index: c.CurrentPage + 1}, int(c.CurrentPage)+1 < len(c.PageStarts)}, {"Confirm", ime.CandidateAction{Kind: ime.CandidateFinalize}, c.Selection >= 0}, {"Cancel", ime.CandidateAction{Kind: ime.CandidateAbort}, true}}
 			width := max(int32(1), (all.Right-8)/4)
 			for j, a := range actions {
-				box := winRect{4 + int32(j)*width, y, 4 + int32(j+1)*width, min(all.Bottom, y+w.rowHeight)}
+				box := winRect{4 + int32(j)*width, y, 4 + int32(j+1)*width, min(all.Bottom-w.rowHeight, y+w.rowHeight)}
 				if !validRect(box) || box.Bottom-box.Top < w.rowHeight {
 					complete = false
 					if !validRect(box) {
@@ -322,11 +319,35 @@ func (w *desktopWindow) paint(dc uintptr) error {
 	} else if w.desktop != nil && w.desktop.ready {
 		label = "Click the desktop to type"
 	}
-	return paintLabel(dc, label, 8, y+3, winRect{0, y, all.Right, all.Bottom})
+	if w.desktop != nil {
+		if displayLabel := w.desktop.display.label(); displayLabel != "" {
+			label = displayLabel
+		}
+	}
+	button := w.fullscreenButton()
+	if err := paintLabel(dc, label, 8, y+3, winRect{0, y, int32(button.Min.X), all.Bottom}); err != nil {
+		return err
+	}
+	box := winRect{int32(button.Min.X), int32(button.Min.Y), int32(button.Max.X), int32(button.Max.Y)}
+	if !validRect(box) {
+		return nil
+	}
+	color := uint32(0xd6e8ff)
+	if w.fullscreenPressed {
+		color = 0xb4d3fa
+	}
+	if err := brushRect(dc, box, rgb(color)); err != nil {
+		return err
+	}
+	label = "Full screen"
+	if w.fullscreen.active {
+		label = "Exit full screen"
+	}
+	return paintLabel(dc, label, box.Left+8, box.Top+3, box)
 }
 
 func (w *desktopWindow) mouse(message uint32, wp, lp uintptr) {
-	if w.loop == nil || w.closing || w.blurRequested {
+	if w.closing || w.blurRequested {
 		return
 	}
 	p := image.Pt(int(int16(lp)), int(int16(lp>>16)))
@@ -343,6 +364,12 @@ func (w *desktopWindow) mouse(message uint32, wp, lp uintptr) {
 			return
 		}
 		p = image.Pt(int(point.X), int(point.Y))
+	}
+	if w.fullscreenMouse(message, p) {
+		return
+	}
+	if w.loop == nil {
+		return
 	}
 	var button rdp.MouseButton
 	down := false

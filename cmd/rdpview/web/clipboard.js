@@ -1,7 +1,7 @@
 'use strict';
 // Explicit clipboard actions, with one page operation and one owned preview.
 // Markup is data only: no innerHTML, DOM parsing, source URLs or remote assets.
-globalThis.OpenRDPClipboard=class OpenRDPClipboard {
+globalThis.RdpGoClipboard=class RdpGoClipboard {
  constructor({request,document:doc=globalThis.document,onBusy=()=>{},clipboard=globalThis.navigator?.clipboard}) {
   this.request=request;this.doc=doc;this.onBusy=onBusy;this.clipboard=clipboard;
   this.seq=0;this.pending=null;this.draft=null;this.url=null;this.dead=false;this.state={};
@@ -114,8 +114,8 @@ globalThis.OpenRDPClipboard=class OpenRDPClipboard {
   }catch(e){this.failure(e,op);}finally{this.finish(op);}
  }
  async call(op,path,options){
-  const response=await this.request(path,{...options,signal:op.controller.signal,headers:{...options.headers,'X-OpenRDP-Generation':String(op.generation)}});
-  if(response.headers.get('X-OpenRDP-Generation')!==String(op.generation)){const e=new Error('connection changed');e.status=409;throw e;}
+  const response=await this.request(path,{...options,signal:op.controller.signal,headers:{...options.headers,'X-RdpGo-Generation':String(op.generation)}});
+  if(response.headers.get('X-RdpGo-Generation')!==String(op.generation)){const e=new Error('connection changed');e.status=409;throw e;}
   return response;
  }
  async send(){

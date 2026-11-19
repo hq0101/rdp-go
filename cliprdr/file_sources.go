@@ -28,6 +28,11 @@ type FileSourceOffer struct {
 	Readers    []io.ReaderAt
 	Additional []Data
 	Release    func() error
+	// PreferredDropEffect observes the source's Shell drop intent: 1 copy,
+	// 2 move, 3 both; zero means unspecified and is treated as copy. It is
+	// advisory local metadata only: CLIPRDR file transfer is copy-only and
+	// Publish never encodes it. No implementation moves or deletes sources.
+	PreferredDropEffect uint32
 }
 
 type FileSourceStatus struct {

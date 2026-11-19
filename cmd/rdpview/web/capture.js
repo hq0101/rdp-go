@@ -1,6 +1,6 @@
 'use strict';
 
-globalThis.OpenRDPCapture=class {
+globalThis.RdpGoCapture=class {
  constructor({request,button,message,AudioContext=globalThis.AudioContext,AudioWorkletNode=globalThis.AudioWorkletNode,getUserMedia=c=>navigator.mediaDevices.getUserMedia(c),random=globalThis.crypto}){
   Object.assign(this,{request,button,message,AudioContext,AudioWorkletNode,getUserMedia,random});
   this.info={enabled:false,epoch:'1',recording:false};this.phase='connected';this.want=false;this.ended=false;this.serial=0;this.starting=false;this.acquiring=false;
@@ -47,7 +47,7 @@ globalThis.OpenRDPCapture=class {
    if(op!==this.serial||!this.want)return;
    if(context.state!=='running'||stream.getAudioTracks().length===0)throw Error('capture unavailable');
    this.source=context.createMediaStreamSource(stream);
-   this.node=new this.AudioWorkletNode(context,'openrdp-capture',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],channelCountMode:'max',channelInterpretation:'discrete'});
+   this.node=new this.AudioWorkletNode(context,'rdpgo-capture',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],channelCountMode:'max',channelInterpretation:'discrete'});
    this.node.port.onmessage=e=>this.samples(e.data);
    this.node.onprocessorerror=()=>{this.stop(true,false);this.note='音频处理已停止，请重新开启';this.draw();};
    this.mute=context.createGain();this.mute.gain.value=0;

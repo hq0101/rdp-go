@@ -123,6 +123,7 @@ type Session struct {
 	networkInfo        NetworkInfo
 	networkEstablished bool // readGate; remains true across reactivation
 	active             atomic.Bool
+	disconnectSent     atomic.Bool
 	readGate           chan struct{}
 	inputGate          chan struct{}
 	textNext           time.Time // inputGate; pacing also spans consecutive SendText calls
@@ -198,6 +199,17 @@ func (s *Session) closeNow() error {
 	s.active.Store(false)
 	if s.dynamic != nil {
 		s.dynamic.stop(net.ErrClosed)
+	}
+	// MS-RDPBCGR 1.3.1.4.1: an immediate client disconnect announces itself
+	// with a user-requested ultimatum before the socket goes away. A failed
+	// write must not mask the close or reclassify an already dead transport.
+	// A transport without TLS never carried an MCS domain to leave.
+	if t := s.connection.Transport; t.conn != nil && s.disconnectSent.CompareAndSwap(false, true) {
+		if pdu, err := mcs.EncodeDisconnectProviderUltimatum(mcs.DisconnectUserRequested); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_ = t.WriteMCS(ctx, pdu)
+			cancel()
+		}
 	}
 	return s.connection.Transport.Close()
 }
@@ -479,8 +491,8 @@ packetLoop:
 			}
 			continue
 		}
-		if len(f.Data) > 0 && f.Data[0]&0xfc == 0x20 {
-			return mcs.DataIndication{}, nil, errors.New("rdp: server disconnected (MCS Disconnect Provider Ultimatum)")
+		if reason, err := mcs.ParseDisconnectProviderUltimatum(f.Data); err == nil {
+			return mcs.DataIndication{}, nil, fmt.Errorf("rdp: server disconnected (MCS Disconnect Provider Ultimatum: %s)", reason)
 		}
 		d, err := mcs.ParseDataIndication(f.Data)
 		if err != nil {

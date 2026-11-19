@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"image"
+	"math"
 	"time"
 	"unicode/utf8"
 
 	"github.com/hq0101/rdp-go"
+	"github.com/hq0101/rdp-go/clipsync"
 	"github.com/hq0101/rdp-go/keyboard"
 	"github.com/hq0101/rdp-go/rdpgfx"
 )
@@ -43,12 +45,72 @@ type Options struct {
 	Title           string
 	Width, Height   int
 	GraphicsProfile rdpgfx.Profile
+	// ClipboardMode explicitly enables session-wide clipboard synchronization,
+	// including when this window is unfocused. Zero is off. The session must
+	// negotiate cliprdr and allow cliprdr.MaxMessage in StaticChannelLimits.
+	ClipboardMode clipsync.Mode
+	// ClipboardHost optionally supplies an existing/custom system adapter. Once
+	// Run validates the session it takes ownership and closes/joins the Host.
+	// Nil opens the Windows adapter only when clipboard is enabled. The default
+	// supports Unicode, HTML, PNG, DIB/DIBV5 and optional remote virtual files.
+	ClipboardHost clipsync.Host
+	// ClipboardFiles explicitly enables remote-to-local virtual files with an
+	// aggregate size quota. Requires a ClipboardMode containing ToLocal.
+	// Nil leaves file receiving disabled; use ClipboardUpload for local sources.
+	ClipboardFiles *clipsync.FileOptions
+	// ClipboardUpload explicitly enables local-to-remote files. Requires a
+	// ClipboardMode containing ToRemote and a LocalFileHost when customized.
+	// Its quota includes sources retained by older remote clipboard locks.
+	ClipboardUpload *clipsync.FileOptions
+	// Fullscreen initially covers the current monitor. Ctrl+Alt+Break or the
+	// local button toggles it and restores the preceding window placement.
+	// With DynamicResolution disabled, this only scales the desktop locally.
+	Fullscreen bool
+	// DynamicResolution requests one primary monitor matching the local client
+	// area (excluding the fixed input/status rows) after resizing settles. The
+	// session must use managed DVCs with a disp.ChannelName listener whose limit
+	// is at least 56 bytes (one monitor layout, in addition to 20-byte caps). Server
+	// activation/graphics RESET, rather than the request, defines actual bounds.
+	// Unsupported or unconfirmed requests keep the last actual resolution.
+	DynamicResolution bool
+	// LocalCandidateUI requests TSF UI-element integration on the window's
+	// private thread. Only supporting input services can activate in this mode;
+	// leave false for compatibility with other services. Native candidate UI is
+	// hidden only after a complete, actionable replacement has been painted.
+	LocalCandidateUI bool
 	// RefreshInterval bounds frame publication, not network packet processing.
 	// Zero selects 50ms. It must be between 16ms and one second.
 	RefreshInterval time.Duration
 }
 
 func normalize(o Options) (Options, error) {
+	if o.ClipboardMode > clipsync.Both || (o.ClipboardMode == clipsync.Off && o.ClipboardHost != nil) {
+		return Options{}, ErrInvalid
+	}
+	if o.ClipboardFiles != nil {
+		if o.ClipboardMode&clipsync.ToLocal == 0 || o.ClipboardFiles.MaxTotalSize > math.MaxInt64 {
+			return Options{}, ErrInvalid
+		}
+		if o.ClipboardHost != nil {
+			if _, ok := o.ClipboardHost.(clipsync.FileHost); !ok {
+				return Options{}, ErrInvalid
+			}
+		}
+		files := *o.ClipboardFiles
+		o.ClipboardFiles = &files
+	}
+	if o.ClipboardUpload != nil {
+		if o.ClipboardMode&clipsync.ToRemote == 0 || o.ClipboardUpload.MaxTotalSize > math.MaxInt64 {
+			return Options{}, ErrInvalid
+		}
+		if o.ClipboardHost != nil {
+			if _, ok := o.ClipboardHost.(clipsync.LocalFileHost); !ok {
+				return Options{}, ErrInvalid
+			}
+		}
+		files := *o.ClipboardUpload
+		o.ClipboardUpload = &files
+	}
 	if o.Title == "" {
 		o.Title = "rdp-go"
 	}

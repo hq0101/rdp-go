@@ -37,7 +37,7 @@ var (
 	coInit           = ole32.NewProc("CoInitializeEx")
 	coUninit         = ole32.NewProc("CoUninitialize")
 	coCreate         = ole32.NewProc("CoCreateInstance")
-	propertyName     = syscall.StringToUTF16Ptr("OpenRDP.IME.Owner.v1")
+	propertyName     = syscall.StringToUTF16Ptr("RdpGo.IME.Owner.v1")
 	windowIDs        atomic.Uint64
 	clsProfiles      = rail.GUID{Data1: 0x33c53a50, Data2: 0xf456, Data3: 0x4884, Data4: [8]byte{0xb0, 0x49, 0x85, 0xfd, 0x64, 0x3e, 0xcf, 0xed}}
 	iidProfiles      = rail.GUID{Data1: 0x71c6e74c, Data2: 0x0f28, Data3: 0x11d8, Data4: [8]byte{0xa8, 0x2a, 0, 6, 0x5b, 0x84, 0x43, 0x5c}}
@@ -93,7 +93,8 @@ type nativeProfile struct {
 // WindowsAdapter uses TSF for profile identity and change notifications. Its
 // explicit state backend defaults to the bound HWND's IMM context; WindowsTSF
 // instead reads/writes the thread manager's keyboard compartments. Both require
-// the bound foreground focus. Missing state returns ErrUnavailable. It requires
+// the bound foreground focus. Unset TSF values leave CompartmentKnown false;
+// other unavailable state returns ErrUnavailable. It requires
 // a native UI thread and message loop. OpenDocument supplies an optional text
 // store; rendering and the language bar belong to the caller. Japanese Kana
 // uses the thread's VK_KANA toggle.
@@ -334,7 +335,7 @@ func (a *WindowsAdapter) snapshot() (Snapshot, error) {
 	s := Snapshot{Profile: p}
 	if p.Type == rail.ProfileInputProcessor {
 		if a.backend == WindowsTSF {
-			s.Compartment, err = a.watch.read()
+			s.Compartment, s.CompartmentKnown, err = a.watch.readOptional()
 			if err != nil {
 				return Snapshot{}, err
 			}
@@ -350,9 +351,9 @@ func (a *WindowsAdapter) snapshot() (Snapshot, error) {
 				return Snapshot{}, ErrUnavailable
 			}
 			s.Compartment = rail.IMECompartment{Open: open != 0, ConversionMode: rail.IMEConversionMode(conv), SentenceMode: rail.IMESentenceMode(sentence)}
+			s.CompartmentKnown = true
 		}
-		s.CompartmentKnown = true
-		if p.LanguageID&0x3ff == 0x11 {
+		if s.CompartmentKnown && p.LanguageID&0x3ff == 0x11 {
 			var keys [256]byte
 			if ok, _, _ := getKeys.Call(uintptr(unsafe.Pointer(&keys[0]))); ok == 0 {
 				return Snapshot{}, ErrUnavailable

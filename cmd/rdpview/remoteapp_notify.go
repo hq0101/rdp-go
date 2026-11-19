@@ -85,7 +85,7 @@ func (v *viewer) serveAppNotifications(w http.ResponseWriter, r *http.Request) {
 		}
 		v.frameMu.Lock()
 		defer v.frameMu.Unlock()
-		if v.app == nil || !v.active || r.Header.Get("X-OpenRDP-Generation") != strconv.FormatUint(v.generation, 10) || !v.app.client.Status().Ready {
+		if v.app == nil || !v.active || r.Header.Get("X-RdpGo-Generation") != strconv.FormatUint(v.generation, 10) || !v.app.client.Status().Ready {
 			w.WriteHeader(409)
 			return
 		}
@@ -150,7 +150,7 @@ func (v *viewer) serveAppNotifications(w http.ResponseWriter, r *http.Request) {
 	v.frameMu.Lock()
 	defer v.frameMu.Unlock()
 	a := v.app
-	if a == nil || !v.active || v.stopping.Load() || r.Header.Get("X-OpenRDP-Generation") != strconv.FormatUint(v.generation, 10) || !a.client.Status().Ready {
+	if a == nil || !v.active || v.stopping.Load() || r.Header.Get("X-RdpGo-Generation") != strconv.FormatUint(v.generation, 10) || !a.client.Status().Ready {
 		w.WriteHeader(409)
 		return
 	}
@@ -207,7 +207,7 @@ func (v *viewer) serveAppNotifications(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(409)
 				return
 			}
-			w.Header().Set("X-OpenRDP-Balloon", strconv.FormatUint(handle.Display, 10))
+			w.Header().Set("X-RdpGo-Balloon", strconv.FormatUint(handle.Display, 10))
 			if !fresh {
 				w.WriteHeader(204)
 				return

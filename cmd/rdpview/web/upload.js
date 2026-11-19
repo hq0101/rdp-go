@@ -1,5 +1,5 @@
 'use strict';
-globalThis.OpenRDPUpload=class {
+globalThis.RdpGoUpload=class {
  constructor({request,document:doc=globalThis.document}) {
   this.request=request;this.state={};this.seq=0;this.pending=null;this.files=[];this.dead=false;this.published=false;
   this.e={};for(const id of ['upload-files','upload-folder','upload-send','upload-clear','upload-list','upload-progress','upload-message'])this.e[id]=doc.getElementById(id);
@@ -22,13 +22,13 @@ globalThis.OpenRDPUpload=class {
   this.files=files;this.e['upload-list'].textContent=files.map(f=>f.webkitRelativePath||f.name).join('\n');this.message(`已选择 ${files.length} 个文件，合计 ${(total/1048576).toFixed(2)} MB；点击发送后再到远端粘贴`);this.render();
  }
  current(op){return !this.dead&&this.pending===op&&op.seq===this.seq&&op.generation===this.state.generation&&this.state.active&&this.state.phase==='connected';}
- cancelRemote(op){if(!op?.id)return;this.request('/clipboard/upload',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(op.generation)},body:JSON.stringify({action:'cancel',id:op.id})}).catch(()=>{});}
+ cancelRemote(op){if(!op?.id)return;this.request('/clipboard/upload',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(op.generation)},body:JSON.stringify({action:'cancel',id:op.id})}).catch(()=>{});}
  invalidate(){const op=this.pending;++this.seq;this.pending=null;if(op){op.controller.abort();this.cancelRemote(op);}this.files=[];this.published=false;for(const id of ['upload-files','upload-folder'])this.e[id].value='';this.e['upload-list'].textContent='';this.e['upload-progress'].value=0;this.e['upload-progress'].max=1;}
  clear(){const sent=this.published||this.pending?.publishing;this.invalidate();this.message(sent?'已清除本页选择；远端已接受的文件仍可能被粘贴':'已取消上传并清除选择');this.render();}
  end(){if(this.dead)return;this.invalidate();this.dead=true;this.render();this.message('连接已结束，文件选择已清除');}
  async call(op,path,options){const timer=setTimeout(()=>op.controller.abort(),30000);try {
-  const r=await this.request(path,{...options,signal:op.controller.signal,headers:{...options.headers,'X-OpenRDP-Generation':String(op.generation)}});
-  if(r.headers.get('X-OpenRDP-Generation')!==String(op.generation))throw Object.assign(new Error('connection changed'),{transferError:'changed'});return r;
+  const r=await this.request(path,{...options,signal:op.controller.signal,headers:{...options.headers,'X-RdpGo-Generation':String(op.generation)}});
+  if(r.headers.get('X-RdpGo-Generation')!==String(op.generation))throw Object.assign(new Error('connection changed'),{transferError:'changed'});return r;
  }finally{clearTimeout(timer);}}
  async start(){
   if(!this.available()||this.pending||!this.files.length||this.state.clipboard.busy||this.state.clipboard.file_busy)return;

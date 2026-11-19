@@ -90,7 +90,7 @@ func dialTarget(ctx context.Context, address string, o Options) (net.Conn, error
 	g.Options.Resources = []string{host}
 	g.Options.Port = uint16(n)
 	if g.Options.ClientName == "" {
-		g.Options.ClientName = "openrdp"
+		g.Options.ClientName = "rdpgo"
 	}
 	apply := g.Options.ApplyPolicy
 	g.Options.ApplyPolicy = func(ctx context.Context, i rdgateway.Info) error {

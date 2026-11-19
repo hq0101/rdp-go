@@ -1,8 +1,10 @@
-// Package rdpdr implements MS-RDPEFS channel negotiation and drive device message
+// Package rdpdr implements MS-RDPEFS channel negotiation and device message
 // routing. CoreClient advertises no devices, as needed alongside Windows audio.
 // DriveClient announces only explicitly configured logical devices; it performs
-// no filesystem access. File request/response codecs handle wire layouts;
-// filesystem policy, handles, operation semantics and I/O belong to a backend.
+// no filesystem access. PrinterClient likewise announces explicitly configured
+// queues per MS-RDPEPC without touching a local spooler. File request/response
+// codecs handle wire layouts; filesystem policy, handles, operation semantics
+// and I/O belong to a backend.
 package rdpdr
 
 import (
@@ -23,7 +25,7 @@ type Result struct {
 }
 
 // CoreClient has a usable zero value and requires serialized access. The only
-// client name it sends is "openrdp". Its zero value advertises minor version 12
+// client name it sends is "rdpgo". Its zero value advertises minor version 12
 // with servers advertising 12 or 13; DriveClient may explicitly opt into 13.
 // Older device protocols are not implemented.
 // Unknown/malformed messages return ErrProtocol without changing its state.
@@ -53,7 +55,7 @@ func (c *CoreClient) Handle(data []byte) (Result, error) {
 		reply := []byte{0x72, 0x44, 0x43, 0x43, 1, 0, 12, 0}
 		binary.LittleEndian.PutUint16(reply[6:], minor)
 		reply = binary.LittleEndian.AppendUint32(reply, id)
-		name := []byte{0x72, 0x44, 0x4e, 0x43, 1, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 'o', 0, 'p', 0, 'e', 0, 'n', 0, 'r', 0, 'd', 0, 'p', 0, 0, 0}
+		name := []byte{0x72, 0x44, 0x4e, 0x43, 1, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 'r', 0, 'd', 0, 'p', 0, 'g', 0, 'o', 0, 0, 0}
 		*c = CoreClient{started: true, clientID: id, preferredMinor: c.preferredMinor, minor: minor}
 		out.Replies = [][]byte{reply, name}
 		return out, nil

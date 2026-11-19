@@ -46,6 +46,7 @@ type inputHost interface {
 	QueueFlush(context.Context, ime.TextFocus) (*ime.DeliveryReceipt, error)
 	QueueKey(context.Context, ime.TextFocus, ime.WindowsKeyMessage, bool) (*ime.DeliveryReceipt, error)
 	Snapshot(ime.TextFocus) (ime.TextSnapshot, error)
+	InsertText(ime.TextFocus, string) (bool, error)
 }
 type mouseAction struct {
 	kind    uint8
@@ -64,6 +65,9 @@ const (
 )
 
 type inputItem struct {
+	packet    *ime.WindowsMessage
+	character *characterMessage
+	text      characterRun
 	key       ime.WindowsKeyMessage
 	state     ime.WindowsKeyboardState
 	mouse     mouseAction
@@ -80,6 +84,9 @@ func receiptCompletion(r *ime.DeliveryReceipt) completion {
 }
 
 type inputLoop struct {
+	characters         characterState
+	packetWaiting      packetCompletion
+	translatePacket    func(ime.WindowsMessage) (packetCompletion, error)
 	host               inputHost
 	token              ime.TextFocus
 	queue              []inputItem
@@ -149,6 +156,60 @@ func (q *inputLoop) advance(ctx context.Context) error {
 			return nil
 		}
 		item := q.queue[0]
+		if q.packetWaiting != nil {
+			chars, done := q.packetWaiting()
+			if !done {
+				return nil
+			}
+			q.packetWaiting = nil
+			q.pop()
+			if len(chars)+len(q.queue) > 256 {
+				return errInputOverflow
+			}
+			items := make([]inputItem, 0, len(chars)+len(q.queue))
+			for _, c := range chars {
+				character := c
+				items = append(items, inputItem{character: &character})
+			}
+			q.queue = append(items, q.queue...)
+			continue
+		}
+		if item.character != nil {
+			run, err := q.characters.accept(*item.character)
+			if err != nil {
+				return err
+			}
+			q.queue[0].character = nil
+			q.queue[0].text = run
+			if run.remaining == 0 {
+				q.pop()
+			}
+			continue
+		}
+		if item.text.remaining != 0 {
+			text, n := item.text.chunk()
+			applied, err := q.host.InsertText(q.token, text)
+			if !applied && (busy(err) || errors.Is(err, ime.ErrChanged)) {
+				return nil
+			}
+			if !applied && errors.Is(err, rail.ErrInvalid) {
+				return errCharacterInput
+			}
+			if err != nil {
+				return err
+			}
+			if !applied {
+				return ErrInvalid
+			}
+			q.queue[0].text.remaining -= n
+			if q.queue[0].text.remaining == 0 {
+				q.pop()
+			}
+			continue // newly committed local text must flush before any later input
+		}
+		if q.characters.high != 0 && item.packet == nil {
+			return errCharacterInput
+		}
 		if item.candidate != nil {
 			invoked, err := q.host.ApplyCandidate(q.token, item.candidate.token, item.candidate.action)
 			if busy(err) && !invoked {
@@ -191,6 +252,27 @@ func (q *inputLoop) advance(ctx context.Context) error {
 			}
 			q.filtered, q.consumed = true, consumed
 			continue // Pump and flush edits produced by this native key first.
+		}
+		if item.packet != nil {
+			if q.consumed || item.key.Message == 0x101 || item.key.Message == 0x105 {
+				q.pop()
+				continue
+			}
+			if q.translatePacket == nil {
+				return ErrInvalid
+			}
+			wait, err := q.translatePacket(*item.packet)
+			if busy(err) && wait == nil {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if wait == nil {
+				return ErrInvalid
+			}
+			q.packetWaiting = wait
+			return nil
 		}
 		r, err = q.host.QueueKey(ctx, q.token, item.key, q.consumed)
 		if busy(err) {

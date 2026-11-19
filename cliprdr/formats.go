@@ -34,12 +34,34 @@ type Data struct {
 }
 
 func (c *Client) RemoteFormatList() []Format { return append([]Format(nil), c.remoteFormats...) }
+
+// ValidateFormatList checks a complete reassembled Format List PDU using the
+// negotiated name encoding without changing ownership, versions or pending
+// operations. Native adapters may use it before bounded, ordered deferral.
+// It does not acknowledge the offer; Handle must still process it later.
+func (c *Client) ValidateFormatList(p []byte) error {
+	p, err := clipboardPacket(p)
+	if err != nil || !c.ready || binary.LittleEndian.Uint16(p) != 2 {
+		return ErrProtocol
+	}
+	_, err = c.formatList(binary.LittleEndian.Uint16(p[2:]), p[8:])
+	return err
+}
+
+func (c *Client) formatList(flags uint16, body []byte) ([]Format, error) {
+	if flags != 0 && flags != 4 {
+		return nil, ErrProtocol
+	}
+	return parseFormats(body, c.longNames, flags == 4)
+}
 func (c *Client) clearLocal() {
 	c.fileOwnershipChanged()
 	for _, d := range c.local {
 		clear(d.Bytes)
 	}
 	c.local = nil
+	c.delayed = nil
+	c.dataOwner = nil
 }
 
 // Reset releases held clipboard bytes and forgets negotiation and pending
@@ -47,6 +69,7 @@ func (c *Client) clearLocal() {
 // untagged request on a live channel.
 func (c *Client) Reset() {
 	c.clearLocal()
+	clear(c.serving)
 	if c.files != nil {
 		// Opaque handles may outlive this Client; release everything reachable
 		// through their old owner as well as the Client's own references.
@@ -63,7 +86,7 @@ func (c *Client) Publish(data []Data) ([]byte, error) {
 	if !c.ready {
 		return nil, ErrNotReady
 	}
-	if c.offerPending || c.readPending {
+	if c.offerPending || c.readPending || len(c.serving) != 0 {
 		return nil, ErrBusy
 	}
 	if len(data) > MaxFormats {
@@ -86,16 +109,7 @@ func (c *Client) Publish(data []Data) ([]byte, error) {
 	for i, d := range data {
 		owned[i] = Data{d.Format, append([]byte{}, d.Bytes...)}
 	}
-	c.clearLocal()
-	c.local = owned
-	c.localOwned = true
-	c.localAccepted = false
-	c.offerPending = true
-	c.offerLocal = true
-	c.remoteText = false
-	c.remoteFormats = nil
-	c.remoteVersion++
-	return packet(2, 0, body), nil
+	return c.beginOffer(body, owned, nil), nil
 }
 
 // Request starts one untagged read of an advertised format. Name takes priority

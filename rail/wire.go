@@ -49,9 +49,11 @@ const (
 	OrderIMECompartment  Order = 0x0012
 	OrderGetAppID        Order = 0x000e
 	OrderAppID           Order = 0x000f
+	OrderTaskbarInfo     Order = 0x0010
 	OrderHandshakeEx     Order = 0x0013
 	OrderZOrderSync      Order = 0x0014
 	OrderCloak           Order = 0x0015
+	OrderPowerDisplay    Order = 0x0016
 	OrderWindowSnap      Order = 0x0017
 	OrderAppIDEx         Order = 0x0018
 	OrderTextScale       Order = 0x0019
@@ -163,19 +165,50 @@ type ApplicationID struct {
 	ProcessImageName string
 }
 
-// Event contains the one field corresponding to Order. All strings own their
-// storage. Server notices must not be treated as authorization to alter local
-// settings or execute commands. A successful ExecuteResult reports a remote
-// launch, not proof that a window has been received or displayed.
 type CloakState struct {
 	WindowID uint32
 	Cloaked  bool
 }
 
+// TaskbarMessage values from MS-RDPERP 2.2.2.14.1.
+type TaskbarMessage uint32
+
+const (
+	TaskbarTabRegister   TaskbarMessage = 1
+	TaskbarTabUnregister TaskbarMessage = 2
+	TaskbarTabOrder      TaskbarMessage = 3
+	TaskbarTabActive     TaskbarMessage = 4
+	TaskbarTabProperties TaskbarMessage = 5
+)
+
+// TaskbarTab is one server tab-group change. Body depends on Message: register
+// and active carry the tab's window ID, order carries the window ID to precede
+// (zero appends at the group end), properties carry STPFLAG bits, and unregister
+// ignores Body (the wire SHOULD send zero). Window IDs identify remote session
+// windows, never local OS windows; presenting tabs is the application's job.
+type TaskbarTab struct {
+	Message  TaskbarMessage
+	WindowID uint32
+	Body     uint32
+}
+
+// PowerDisplayState reports the server's display-required power request. Active
+// means the remote session asks that the display stay powered on. The library
+// only reports it; changing local power or display settings is never performed.
+type PowerDisplayState struct {
+	Active bool
+}
+
+// Event contains the one field corresponding to Order. All strings own their
+// storage. Server notices must not be treated as authorization to alter local
+// settings or execute commands. A successful ExecuteResult reports a remote
+// launch, not proof that a window has been received or displayed.
 type Event struct {
 	LanguageBar     LanguageBarStatus // OrderLanguageBar; unknown bits preserved.
 	IMECompartment  IMECompartment    // OrderIMECompartment; no profile identity on wire.
 	Cloak           CloakState        // OrderCloak; only 0/1 are accepted on the wire.
+	Taskbar         TaskbarTab        // OrderTaskbarInfo; requires negotiated shell integration.
+	PowerDisplay    PowerDisplayState // OrderPowerDisplay; only 0/1 are accepted on the wire.
 	Order           Order
 	Handshake       Handshake
 	Execute         ExecuteResult
@@ -367,6 +400,19 @@ func ParseServerPDU(p []byte) (Event, error) {
 			return Event{}, ErrInvalid
 		}
 		e.Cloak = CloakState{WindowID: le.Uint32(b), Cloaked: b[4] == 1}
+	case OrderTaskbarInfo:
+		if len(b) != 12 {
+			return Event{}, ErrInvalid
+		}
+		e.Taskbar = TaskbarTab{Message: TaskbarMessage(le.Uint32(b)), WindowID: le.Uint32(b[4:]), Body: le.Uint32(b[8:])}
+		if e.Taskbar.Message < TaskbarTabRegister || e.Taskbar.Message > TaskbarTabProperties {
+			return Event{}, ErrUnsupported
+		}
+	case OrderPowerDisplay:
+		if len(b) != 4 || le.Uint32(b) > 1 {
+			return Event{}, ErrInvalid
+		}
+		e.PowerDisplay = PowerDisplayState{Active: le.Uint32(b) == 1}
 	case OrderZOrderSync:
 		if len(b) != 4 {
 			return Event{}, ErrInvalid

@@ -554,7 +554,7 @@ func (v *viewer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid origin", http.StatusForbidden)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-OpenRDP-Token")), []byte(v.token)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-RdpGo-Token")), []byte(v.token)) != 1 {
 		http.Error(w, "authentication required", http.StatusForbidden)
 		return
 	}
@@ -635,9 +635,9 @@ func (v *viewer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.frameMu.Lock()
-		w.Header().Set("X-OpenRDP-Generation", strconv.FormatUint(v.generation, 10))
+		w.Header().Set("X-RdpGo-Generation", strconv.FormatUint(v.generation, 10))
 		if v.app != nil {
-			w.Header().Set("X-OpenRDP-App-Revision", v.app.presentedToken)
+			w.Header().Set("X-RdpGo-App-Revision", v.app.presentedToken)
 		}
 		v.imageMu.RLock()
 		data, version := v.png, v.version
@@ -679,7 +679,7 @@ func (v *viewer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer v.inputMu.Unlock()
 		v.frameMu.Lock()
 		v.expireResizeLocked(time.Now())
-		if !v.active || v.reconnection.Phase != "connected" || v.resize.Pending || r.Header.Get("X-OpenRDP-Generation") != strconv.FormatUint(v.generation, 10) {
+		if !v.active || v.reconnection.Phase != "connected" || v.resize.Pending || r.Header.Get("X-RdpGo-Generation") != strconv.FormatUint(v.generation, 10) {
 			v.frameMu.Unlock()
 			http.Error(w, "session changed; refresh state", http.StatusConflict)
 			return
@@ -705,7 +705,7 @@ func (v *viewer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// Preserve a demonstrably healthy session, but never replay a prefix.
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					if state, ok := v.remote.(interface{ Info() rdp.SessionInfo }); ok && state.Info().Active {
-						w.Header().Set("X-OpenRDP-Input-Partial", "1")
+						w.Header().Set("X-RdpGo-Input-Partial", "1")
 						http.Error(w, "input canceled; a prefix may already have been entered", http.StatusConflict)
 						return
 					}

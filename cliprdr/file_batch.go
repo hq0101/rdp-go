@@ -62,7 +62,7 @@ func NewFileBatch(parent string, plan *FilePlan, options FileBatchOptions) (*Fil
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.MkdirTemp(abs, ".openrdp-files-")
+	root, err := os.MkdirTemp(abs, ".rdpgo-files-")
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func NewFileBatch(parent string, plan *FilePlan, options FileBatchOptions) (*Fil
 
 func (b *FileBatch) checkRoot() error {
 	rel, err := filepath.Rel(b.parent, b.root)
-	if err != nil || rel == "." || filepath.IsAbs(rel) || strings.ContainsAny(rel, "/\\") || !strings.HasPrefix(rel, ".openrdp-files-") {
+	if err != nil || rel == "." || filepath.IsAbs(rel) || strings.ContainsAny(rel, "/\\") || !strings.HasPrefix(rel, ".rdpgo-files-") {
 		return ErrFilePath
 	}
 	info, err := os.Lstat(b.root)

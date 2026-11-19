@@ -46,7 +46,7 @@ type DirectoryOptions struct {
 	// fail-immediately, as observed with our Windows 10 server. The default
 	// follows MS-RDPEFS 2.2.3.3.12 (F set means wait). Decoding is unchanged.
 	WindowsLockFlagCompatibility bool
-	// VolumeLabel is metadata, not the drive/share name. Empty uses OPENRDP.
+	// VolumeLabel is metadata, not the drive/share name. Empty uses RDPGO.
 	VolumeLabel string
 }
 
@@ -163,7 +163,7 @@ func OpenDirectoryDrive(deviceID uint32, rootPath string, opts DirectoryOptions)
 		return nil, ErrLimit
 	}
 	if opts.VolumeLabel == "" {
-		opts.VolumeLabel = "OPENRDP"
+		opts.VolumeLabel = "RDPGO"
 	}
 	if _, err := EncodeVolumeInformation(VolumeInformation{Label: opts.VolumeLabel}); err != nil {
 		return nil, err
@@ -698,7 +698,7 @@ func (d *DirectoryDrive) volume(class uint32) (uint32, FileResult, error) {
 	case FileFsVolumeInformation:
 		data, err = EncodeVolumeInformation(VolumeInformation{Label: d.opts.VolumeLabel})
 	case FileFsAttributeInformation:
-		data, err = EncodeVolumeAttributeInformation(VolumeAttributeInformation{Attributes: attributes, MaximumComponentLength: 255, FileSystemName: "OPENRDP"})
+		data, err = EncodeVolumeAttributeInformation(VolumeAttributeInformation{Attributes: attributes, MaximumComponentLength: 255, FileSystemName: "RDPGO"})
 	case FileFsDeviceInformation:
 		data, err = EncodeVolumeDeviceInformation(7, characteristics)
 	case FileFsSizeInformation, FileFsFullSizeInformation:

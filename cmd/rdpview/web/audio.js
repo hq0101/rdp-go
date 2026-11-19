@@ -2,7 +2,7 @@
 
 // One bounded playback owner per remote session. This module never reads a
 // microphone or records audio. Web Audio resamples source PCM for the output.
-globalThis.OpenRDPAudio = class {
+globalThis.RdpGoAudio = class {
  constructor({request,button,message,volume,AudioContext=globalThis.AudioContext,random=globalThis.crypto}) {
   Object.assign(this,{request,button,message,volume,AudioContext,random});
   this.info={enabled:false,epoch:'0',playing:false};this.phase='connected';

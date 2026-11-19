@@ -145,7 +145,7 @@ func (v *viewer) clipboardExchange(r *http.Request, offer *[]cliprdr.Data, forma
 		}
 	}
 	defer unlock()
-	generation := r.Header.Get("X-OpenRDP-Generation")
+	generation := r.Header.Get("X-RdpGo-Generation")
 	if !v.clipboardGeneration(generation) {
 		return result, errConnectionChanged
 	}
@@ -231,12 +231,12 @@ func (v *viewer) serveClipboard(w http.ResponseWriter, r *http.Request) {
 		clipboardError(w, cliprdr.ErrBusy)
 		return
 	}
-	generation := r.Header.Get("X-OpenRDP-Generation")
+	generation := r.Header.Get("X-RdpGo-Generation")
 	if !v.clipboardGeneration(generation) {
 		clipboardError(w, errConnectionChanged)
 		return
 	}
-	w.Header().Set("X-OpenRDP-Generation", generation)
+	w.Header().Set("X-RdpGo-Generation", generation)
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
 		w.WriteHeader(http.StatusUnsupportedMediaType)

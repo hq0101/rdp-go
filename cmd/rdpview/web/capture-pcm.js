@@ -4,7 +4,7 @@ const cleanCaptureSample=x=>Number.isFinite(x)?Math.max(-1,Math.min(1,x)):0;
 // Streaming, bounded PCM conversion for the audio rendering thread. Fractional
 // position survives render quantum boundaries; reset means discard all history.
 // A phase table avoids transcendental functions in the per-sample audio loop.
-globalThis.OpenRDPCapturePCM=class {
+globalThis.RdpGoCapturePCM=class {
  constructor(inputRate,outputRate,channels,emit){
   if(!Number.isInteger(inputRate)||inputRate<8000||inputRate>192000||!Number.isInteger(outputRate)||outputRate<8000||outputRate>96000||(channels!==1&&channels!==2))throw Error('invalid capture format');
   Object.assign(this,{inputRate,outputRate,channels,emit});this.frames=Math.round(outputRate/50);

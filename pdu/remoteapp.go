@@ -6,14 +6,15 @@ import (
 )
 
 const (
-	RailLevelSupported   uint32 = 1
-	RailLevelLanguageBar uint32 = 0x2
-	RailLevelLanguageIME uint32 = 0x8
-	RailLevelServerIME   uint32 = 0x10
-	RailLevelHandshakeEx uint32 = 0x80
-	RailLevelCloaking    uint32 = 0x40
-	WindowLevelSupported uint32 = 1
-	WindowLevelExtended  uint32 = 2
+	RailLevelSupported        uint32 = 1
+	RailLevelLanguageBar      uint32 = 0x2
+	RailLevelShellIntegration uint32 = 0x4
+	RailLevelLanguageIME      uint32 = 0x8
+	RailLevelServerIME        uint32 = 0x10
+	RailLevelHandshakeEx      uint32 = 0x80
+	RailLevelCloaking         uint32 = 0x40
+	WindowLevelSupported      uint32 = 1
+	WindowLevelExtended       uint32 = 2
 )
 
 // ErrRemoteAppUnsupported means the server did not offer both required RAIL
@@ -43,6 +44,9 @@ func (c RemoteAppCapabilities) Cloaking() bool {
 func (c RemoteAppCapabilities) LanguageBar() bool {
 	return c.Enabled() && c.RailSupportLevel&RailLevelLanguageBar != 0
 }
+func (c RemoteAppCapabilities) ShellIntegration() bool {
+	return c.Enabled() && c.RailSupportLevel&RailLevelShellIntegration != 0
+}
 func (c RemoteAppCapabilities) LanguageIME() bool {
 	return c.Enabled() && c.RailSupportLevel&RailLevelLanguageIME != 0
 }
@@ -55,8 +59,8 @@ func (c RemoteAppCapabilities) ExtendedWindows() bool {
 
 // RemoteAppOptions requests the implemented RemoteApp capability profile.
 // Enhanced requests GFX window delivery, subject to the server handshake.
-// Language/IME requires explicit host integration; shell integration is not
-// advertised. The application must
+// Language/IME and shell integration require explicit host integration; neither
+// is advertised by default. The application must
 // consume RAIL and window drawing messages; negotiation creates no local UI.
 // Zero counts disable icon caching. Nonzero counts must be paired and total at
 // most 32768 slots, matching WindowState's hard slot bound. There are no implicit
@@ -67,10 +71,14 @@ type RemoteAppOptions struct {
 	// ServerIME requires LanguageIME. Negotiation alone creates no native UI.
 	LanguageBar, LanguageIME, ServerIME bool
 	Cloaking                            bool // Application handles retained invisible windows and input release.
-	Enhanced                            bool // Request only; HandshakeEx determines the actual mode.
-	HandshakeEx, ExtendedWindows        bool
-	IconCaches                          uint8
-	IconEntries                         uint16
+	// ShellIntegration advertises extended shell integration (tabbed windows,
+	// overlay icons). The application must present tabs and consume rail
+	// Taskbar Tab Info notices; negotiation alone creates no local UI.
+	ShellIntegration             bool
+	Enhanced                     bool // Request only; HandshakeEx determines the actual mode.
+	HandshakeEx, ExtendedWindows bool
+	IconCaches                   uint8
+	IconEntries                  uint16
 }
 
 func (o RemoteAppOptions) Validate() error {
@@ -97,6 +105,9 @@ func (o RemoteAppOptions) Negotiate(d Demand) (RemoteAppCapabilities, error) {
 	}
 	if o.Cloaking && s.Cloaking() {
 		c.RailSupportLevel |= RailLevelCloaking
+	}
+	if o.ShellIntegration && s.ShellIntegration() {
+		c.RailSupportLevel |= RailLevelShellIntegration
 	}
 	if o.LanguageBar && s.LanguageBar() {
 		c.RailSupportLevel |= RailLevelLanguageBar

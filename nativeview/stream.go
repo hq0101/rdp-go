@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hq0101/rdp-go"
+	"github.com/hq0101/rdp-go/disp"
 	"github.com/hq0101/rdp-go/dynvc"
 	"github.com/hq0101/rdp-go/graphics"
 	"github.com/hq0101/rdp-go/pdu"
@@ -24,10 +25,12 @@ type desktopUpdate struct {
 	generation    uint64
 	ready         bool
 	err           error
+	display       displayStatus
 }
 type desktopMailbox struct {
-	mu     sync.Mutex
-	latest *desktopUpdate
+	mu            sync.Mutex
+	latest        *desktopUpdate
+	displayTarget displayRequest
 }
 
 func consumePointerPosition(u *desktopUpdate, serial *uint64) (image.Point, bool) {
@@ -72,8 +75,12 @@ func receiveDesktop(ctx context.Context, s Remote, o Options, mailbox *desktopMa
 	configureFrame(frame, info)
 	pointer := graphics.PointerDecoder{AllowNewPointer: info.NewPointer, LargePointerFlags: info.LargePointerFlags}
 	gfx := rdpgfx.Client{Profile: o.GraphicsProfile}
+	display := displayControl{status: displayStatus{enabled: o.DynamicResolution}}
 	if info.GraphicsPipeline && !s.DynamicInfo().Managed {
 		return errors.New("nativeview: graphics pipeline requires managed dynamic channels")
+	}
+	if o.DynamicResolution && !s.DynamicInfo().Managed {
+		return errors.New("nativeview: dynamic resolution requires managed dynamic channels")
 	}
 	if info.SuppressOutput {
 		if err = s.SetDisplayUpdates(ctx, true); err != nil {
@@ -118,7 +125,7 @@ func receiveDesktop(ctx context.Context, s Remote, o Options, mailbox *desktopMa
 	generation := uint64(1)
 	ready, dirty := false, true
 	publish := func(retire chan struct{}) {
-		v := desktopUpdate{retire: retire, info: info, generation: generation, ready: ready, pointer: pointer.Snapshot(), pointerSerial: pointer.Stats().Position}
+		v := desktopUpdate{retire: retire, info: info, generation: generation, ready: ready, pointer: pointer.Snapshot(), pointerSerial: pointer.Stats().Position, display: display.status}
 		if ready && info.Active {
 			v.image = frame.Snapshot()
 		}
@@ -141,6 +148,38 @@ func receiveDesktop(ctx context.Context, s Remote, o Options, mailbox *desktopMa
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			if o.DynamicResolution {
+				before := display.status
+				display.expire(time.Now())
+				request := mailbox.requestedDisplay()
+				packet := display.prepare(request, time.Now(), image.Pt(int(info.Width), int(info.Height)), info.Active && ready)
+				if packet != nil {
+					if err := quiesce(); err != nil {
+						return err
+					}
+					// Native cleanup may outlive a local resize or a server-side
+					// deactivation already observed by the one in-flight reader.
+					if mailbox.requestedDisplay() != request || !s.Info().Active {
+						display.status.phase = displayIdle
+					} else {
+						writeCtx, stopWrite := context.WithTimeout(ctx, 3*time.Second)
+						display.sent(request, time.Now())
+						err := s.SendDynamic(writeCtx, display.id, packet)
+						stopWrite()
+						if err == dynvc.ErrChannel {
+							// A close can be observed by the managed reader before its
+							// event reaches us. This error precedes any wire write.
+							display.status.available = false
+							display.status.phase = displayIdle
+						} else if err != nil {
+							return err
+						}
+					}
+				}
+				if before != display.status {
+					dirty = true
+				}
+			}
 			if dirty {
 				publish(nil)
 			}
@@ -158,6 +197,7 @@ func receiveDesktop(ctx context.Context, s Remote, o Options, mailbox *desktopMa
 					return quiesce()
 				case rdp.EventActivated:
 					info = e.Info
+					display.observed(image.Pt(int(info.Width), int(info.Height)))
 					generation++
 					ready = false
 					if err := frame.Resize(int(info.Width), int(info.Height)); err != nil {
@@ -167,6 +207,13 @@ func receiveDesktop(ctx context.Context, s Remote, o Options, mailbox *desktopMa
 					pointer.AllowNewPointer, pointer.LargePointerFlags = info.NewPointer, info.LargePointerFlags
 					return quiesce()
 				case rdp.EventDynamic:
+					if e.Dynamic.Name == disp.ChannelName && o.DynamicResolution {
+						if err := display.event(e.Dynamic); err != nil {
+							return err
+						}
+						dirty = true
+						return nil
+					}
 					if e.Dynamic.Name != rdpgfx.ChannelName {
 						return nil
 					}
@@ -191,6 +238,7 @@ func receiveDesktop(ctx context.Context, s Remote, o Options, mailbox *desktopMa
 							return err
 						}
 						info.Width, info.Height = uint16(result.Width), uint16(result.Height)
+						display.observed(image.Pt(result.Width, result.Height))
 						ready = false
 						if err = frame.Resize(result.Width, result.Height); err != nil {
 							return err

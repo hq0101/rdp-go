@@ -1,7 +1,7 @@
 'use strict';
 // Server-provided titles are plain text. No server executable, arguments or
 // title is ever interpreted as HTML, JavaScript or a local command.
-class OpenRDPRemoteApp {
+class RdpGoRemoteApp {
  constructor({request,generation,focus,before,after}) {
   Object.assign(this,{request,generation,focus,before,after});this.busy=false;
   this.root=document.getElementById('remoteapp-tools');this.select=document.getElementById('app-windows');this.message=document.getElementById('app-message');
@@ -48,7 +48,7 @@ class OpenRDPRemoteApp {
   try{
    await this.before?.();
    if(epoch!==this.generation())throw new Error('connection changed');
-   await this.request('/remoteapp',{method:'POST',headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(epoch)},body:JSON.stringify(action==='launch'?{action}:{action,window:Number(id),lifetime})});
+   await this.request('/remoteapp',{method:'POST',headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(epoch)},body:JSON.stringify(action==='launch'?{action}:{action,window:Number(id),lifetime})});
    this.message.textContent=['cloak','uncloak'].includes(action)?'窗口显示状态已更新':'请求已发送，等待服务器更新';
    if(['activate','move','size'].includes(action))this.focus();
   }catch{this.message.textContent='请求未确认，请刷新窗口状态后重试；不会自动重复提交';}

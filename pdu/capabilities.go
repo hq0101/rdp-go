@@ -393,7 +393,7 @@ func confirmGraphics(source uint16, d Demand, layout uint32, requested GraphicsO
 		b[8] = remote.IconCaches
 		binary.LittleEndian.PutUint16(b[9:], remote.IconEntries)
 	}
-	desc := []byte("openrdp\x00")
+	desc := []byte("rdpgo\x00")
 	body := binary.LittleEndian.AppendUint32(nil, d.ShareID)
 	body = binary.LittleEndian.AppendUint16(body, 1002) // specified originatorID
 	body = binary.LittleEndian.AppendUint16(body, uint16(len(desc)))

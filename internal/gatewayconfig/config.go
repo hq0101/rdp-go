@@ -328,7 +328,7 @@ func (m *Manager) Options(index int) (*rdp.GatewayOptions, error) {
 			return rdgateway.Credentials{}, ErrClosed
 		}
 		return m.entries[index].credentials, nil
-	}, Options: rdgateway.Options{Kerberos: k, TLSConfig: cfg, CertificateSHA256: c.CertificateSHA256, Authentication: auth, ClientName: "openrdp",
+	}, Options: rdgateway.Options{Kerberos: k, TLSConfig: cfg, CertificateSHA256: c.CertificateSHA256, Authentication: auth, ClientName: "rdpgo",
 		Consent: func(ctx context.Context, prompt string) error {
 			if err := ctx.Err(); err != nil {
 				return err

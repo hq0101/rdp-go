@@ -1,7 +1,7 @@
 'use strict';
 const token=location.hash.slice(1), canvas=document.getElementById('desktop'), ctx=canvas.getContext('2d',{alpha:false});
 const status=document.getElementById('status'), waiting=document.getElementById('waiting'), hint=document.getElementById('hint');
-const headers={'X-OpenRDP-Token':token};
+const headers={'X-RdpGo-Token':token};
 const textValue=document.getElementById('text-value'),textMessage=document.getElementById('text-message');
 let unicodeAvailable=false,clipboardInfo={},textBusy=false,clipboardBusy=false,connectionInfo={},remoteActive=false;
 let displayInfo={},resizeInfo={},resizeSending=false,resizeSeen=-1;
@@ -10,19 +10,19 @@ const desktop=document.createElement('canvas'), desktopCtx=desktop.getContext('2
 let appRevision="",appControl=false,appMoveToken="",appFocusToken="";
 let stopped=false, etag='', queue=[], sending=false, ready=false, generation=0;
 let pointer={Kind:0,Shape:null}, pointerVersion=-1, positionVersion=0, cursorX=0,cursorY=0,inside=false,previousCursor=null;
-const audioPlayer=typeof OpenRDPAudio==='function'?new OpenRDPAudio({request:api,button:document.getElementById('audio-toggle'),message:document.getElementById('audio-message'),volume:document.getElementById('audio-volume')}):null;
-const microphone=typeof OpenRDPCapture==='function'?new OpenRDPCapture({request:api,button:document.getElementById('microphone-toggle'),message:document.getElementById('microphone-message')}):null;
-const richClipboard=typeof OpenRDPClipboard==='function'?new OpenRDPClipboard({request:api,onBusy:busy=>{clipboardBusy=busy;updateTextButtons();}}):null;
-const uploadClipboard=typeof OpenRDPUpload==='function'?new OpenRDPUpload({request:api}):null;
-const notifyUI=typeof OpenRDPNotifications==='function'?new OpenRDPNotifications({request:api,generation:()=>generation,before:beforeAppControl,after:()=>{appControl=false;}}):null;
-const appUI=typeof OpenRDPRemoteApp==='function'?new OpenRDPRemoteApp({request:api,generation:()=>generation,focus:()=>canvas.focus({preventScroll:true}),before:beforeAppControl,after:()=>{appControl=false;etag='';}}):null;
-const fileClipboard=typeof OpenRDPFiles==='function'?new OpenRDPFiles({request:api}):null;
+const audioPlayer=typeof RdpGoAudio==='function'?new RdpGoAudio({request:api,button:document.getElementById('audio-toggle'),message:document.getElementById('audio-message'),volume:document.getElementById('audio-volume')}):null;
+const microphone=typeof RdpGoCapture==='function'?new RdpGoCapture({request:api,button:document.getElementById('microphone-toggle'),message:document.getElementById('microphone-message')}):null;
+const richClipboard=typeof RdpGoClipboard==='function'?new RdpGoClipboard({request:api,onBusy:busy=>{clipboardBusy=busy;updateTextButtons();}}):null;
+const uploadClipboard=typeof RdpGoUpload==='function'?new RdpGoUpload({request:api}):null;
+const notifyUI=typeof RdpGoNotifications==='function'?new RdpGoNotifications({request:api,generation:()=>generation,before:beforeAppControl,after:()=>{appControl=false;}}):null;
+const appUI=typeof RdpGoRemoteApp==='function'?new RdpGoRemoteApp({request:api,generation:()=>generation,focus:()=>canvas.focus({preventScroll:true}),before:beforeAppControl,after:()=>{appControl=false;etag='';}}):null;
+const fileClipboard=typeof RdpGoFiles==='function'?new RdpGoFiles({request:api}):null;
 function end(message){notifyUI?.end();document.getElementById('drive-message').textContent='连接已结束，共享已关闭';uploadClipboard?.end();fileClipboard?.end();richClipboard?.end();microphone?.end();audioPlayer?.end();stopped=true;ready=false;queue=[];drawPointer();updateTextButtons();updateResizeButtons();status.textContent=message;document.getElementById('disconnect').disabled=true;hint.textContent='连接已结束';}
-async function api(path,options={}){const r=await fetch(path,{...options,headers:{...headers,...options.headers},cache:'no-store'});if(!r.ok && r.status!==304){const e=new Error('request failed');e.status=r.status;if(path.startsWith('/clipboard/upload')&&r.headers.get('Content-Type')==='application/json'){try{e.transferError=(await r.json()).error;}catch{}}e.inputPartial=r.headers?.get('X-OpenRDP-Input-Partial')==='1';throw e;}return r;}
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{...headers,...options.headers},cache:'no-store'});if(!r.ok && r.status!==304){const e=new Error('request failed');e.status=r.status;if(path.startsWith('/clipboard/upload')&&r.headers.get('Content-Type')==='application/json'){try{e.transferError=(await r.json()).error;}catch{}}e.inputPartial=r.headers?.get('X-RdpGo-Input-Partial')==='1';throw e;}return r;}
 function enqueue(e){if(stopped||!ready||appControl)return;if(appMoveToken)e.app_move=appMoveToken;if(appFocusToken)e.app_focus=appFocusToken;if(queue.length>=256){disconnect();return;}if(e.kind==='move'&&queue.at(-1)?.kind==='move')queue[queue.length-1]=e;else queue.push(e);}
 async function flush(){
  if(sending||!queue.length||stopped)return;sending=true;const batch=queue.splice(0,64),hasText=batch.some(e=>e.kind==='text'),batchGeneration=generation;
- try{await api('/input',{method:'POST',headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(generation),'X-OpenRDP-App-Revision':appRevision},body:JSON.stringify(batch)});if(generation!==batchGeneration)return;if(hasText)textMessage.textContent='文本已发送到远程当前输入位置';}
+ try{await api('/input',{method:'POST',headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(generation),'X-RdpGo-App-Revision':appRevision},body:JSON.stringify(batch)});if(generation!==batchGeneration)return;if(hasText)textMessage.textContent='文本已发送到远程当前输入位置';}
  catch(e){if(generation!==batchGeneration)return;if(e.inputPartial){queue=[];enqueue({kind:'release'});if(hasText)textMessage.textContent='输入已中止，部分文本可能已输入；请先检查远程内容';else hint.textContent='输入已中止，请检查远程状态后重试';}else if(e.status===409){queue=[];ready=false;etag='';status.textContent='正在恢复会话…';if(hasText)textMessage.textContent='会话正在恢复，本次文本未确认，请恢复后检查再发送';}else if(e.status===422||e.status===400){textMessage.textContent='文本输入未被接受，请使用剪贴板发送';}else end('连接已断开');}
  finally{sending=false;if(hasText&&generation===batchGeneration)textBusy=false;updateTextButtons();}
 }
@@ -81,13 +81,13 @@ async function frames(){
  try{
   const state=await (await api('/status?pointer_version='+pointerVersion)).json();updateState(state);
   const r=await api('/frame',{headers:etag?{'If-None-Match':etag}:{}});
-  if(state.active&&!resizeInfo.pending&&!resizeSending&&r.status===200&&Number(r.headers.get('X-OpenRDP-Generation'))===generation){
+  if(state.active&&!resizeInfo.pending&&!resizeSending&&r.status===200&&Number(r.headers.get('X-RdpGo-Generation'))===generation){
    const frameGeneration=generation,bitmap=await createImageBitmap(await r.blob());
    if(stopped||generation!==frameGeneration||!remoteActive||connectionInfo.phase==='reconnecting'||connectionInfo.phase==='redirecting'||resizeInfo.pending||resizeSending){bitmap.close();return scheduleFrames();}
    if(canvas.width!==bitmap.width||canvas.height!==bitmap.height){canvas.width=bitmap.width;canvas.height=bitmap.height;}
    if(desktop.width!==bitmap.width||desktop.height!==bitmap.height){desktop.width=bitmap.width;desktop.height=bitmap.height;}
    desktopCtx.drawImage(bitmap,0,0);ctx.drawImage(bitmap,0,0);bitmap.close();previousCursor=null;
-   etag=r.headers.get('ETag');appRevision=r.headers.get('X-OpenRDP-App-Revision')||'';ready=!appControl;drawPointer();updateTextButtons();updateResizeButtons();waiting.classList.add('hidden');status.textContent='已连接 · '+canvas.width+' × '+canvas.height;
+   etag=r.headers.get('ETag');appRevision=r.headers.get('X-RdpGo-App-Revision')||'';ready=!appControl;drawPointer();updateTextButtons();updateResizeButtons();waiting.classList.add('hidden');status.textContent='已连接 · '+canvas.width+' × '+canvas.height;
   }
  }catch{end('连接已断开');waiting.textContent='连接已结束，请重新启动测试客户端';}
  scheduleFrames();
@@ -97,7 +97,7 @@ async function beforeAppControl(){
  appControl=true;ready=false;queue=[];
  while(sending&&!stopped)await new Promise(resolve=>setTimeout(resolve,10));
  if(stopped)throw new Error('connection ended');
- await api('/input',{method:'POST',headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(generation),'X-OpenRDP-App-Revision':appRevision},body:JSON.stringify([{kind:'release'}])});
+ await api('/input',{method:'POST',headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(generation),'X-RdpGo-App-Revision':appRevision},body:JSON.stringify([{kind:'release'}])});
 }
 function position(e){const r=canvas.getBoundingClientRect();return{x:Math.max(0,Math.min(canvas.width-1,Math.floor((e.clientX-r.left)*canvas.width/r.width))),y:Math.max(0,Math.min(canvas.height-1,Math.floor((e.clientY-r.top)*canvas.height/r.height)))};}
 canvas.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'){const p=position(e);inside=true;cursorX=p.x;cursorY=p.y;drawPointer();enqueue({kind:'move',...p});}});
@@ -120,7 +120,7 @@ document.getElementById('disconnect').addEventListener('click',disconnect);
 document.getElementById('fullscreen').addEventListener('click',()=>{const screen=document.querySelector('.screen');(document.fullscreenElement?document.exitFullscreen():screen.requestFullscreen()).catch(()=>{});});
 // Navigation also includes reload. Release input, but leave the session alive
 // for the next document; the server expires abandoned pages separately.
-window.addEventListener('pagehide',()=>{uploadClipboard?.end();fileClipboard?.end();richClipboard?.end();microphone?.end();audioPlayer?.end();if(!stopped&&ready)fetch('/input',{method:'POST',headers:{...headers,'Content-Type':'application/json','X-OpenRDP-Generation':String(generation),'X-OpenRDP-App-Revision':appRevision},body:JSON.stringify([{kind:'blur'}]),keepalive:true}).catch(()=>{});});
+window.addEventListener('pagehide',()=>{uploadClipboard?.end();fileClipboard?.end();richClipboard?.end();microphone?.end();audioPlayer?.end();if(!stopped&&ready)fetch('/input',{method:'POST',headers:{...headers,'Content-Type':'application/json','X-RdpGo-Generation':String(generation),'X-RdpGo-App-Revision':appRevision},body:JSON.stringify([{kind:'blur'}]),keepalive:true}).catch(()=>{});});
 function updateTextButtons(){
  richClipboard?.update({generation,ready:ready&&!stopped,active:remoteActive,phase:connectionInfo.phase??'connected',clipboard:clipboardInfo});
  fileClipboard?.update({generation,ready:ready&&!stopped,active:remoteActive,phase:connectionInfo.phase??'connected',clipboard:clipboardInfo});
@@ -138,7 +138,7 @@ async function clipboardAction(action){
  if(richClipboard)return richClipboard.textAction(action);
  if(stopped||!ready||clipboardBusy)return;const actionGeneration=generation;clipboardBusy=true;updateTextButtons();textMessage.textContent='正在传输文本…';
  try{
-  const r=await api('/clipboard',{method:'POST',headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(actionGeneration)},body:JSON.stringify(action==='set'?{action,text:textValue.value}:{action})});
+  const r=await api('/clipboard',{method:'POST',headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(actionGeneration)},body:JSON.stringify(action==='set'?{action,text:textValue.value}:{action})});
   if(generation!==actionGeneration)return;
   if(action==='get'){const result=await r.json();if(generation!==actionGeneration)return;textValue.value=result.text;textMessage.textContent='已读取远程文本，可编辑或复制到本机';}
   else textMessage.textContent='远程已接受文本，可切回远程窗口粘贴';
@@ -156,7 +156,7 @@ async function resizeDesktop(){
  const width=Number(match[1]),height=Number(match[2]),actionGeneration=generation;
  if(width<200||width>8192||width%2||height<200||height>8192||width*height>16777216||width*height>displayInfo.max_area){resizeMessage.textContent='所选分辨率超过当前服务器支持范围';return;}
  resizeSending=true;ready=false;queue=[];etag='';textBusy=false;updateTextButtons();updateResizeButtons();resizeMessage.textContent='正在申请调整分辨率…';
- try{const r=await api('/resize',{method:'POST',headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(generation),'X-OpenRDP-App-Revision':appRevision},body:JSON.stringify({width,height})});if(generation!==actionGeneration)return;resizeMessage.textContent=r.status===204?'当前已是所选分辨率':'请求已发送，等待服务器实际切换…';}
+ try{const r=await api('/resize',{method:'POST',headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(generation),'X-RdpGo-App-Revision':appRevision},body:JSON.stringify({width,height})});if(generation!==actionGeneration)return;resizeMessage.textContent=r.status===204?'当前已是所选分辨率':'请求已发送，等待服务器实际切换…';}
  catch(e){if(generation!==actionGeneration)return;resizeMessage.textContent=e.status===409?'当前暂时无法调整，请等待桌面恢复后重试':e.status===400?'服务器不支持所选尺寸':'分辨率请求未完成，请检查连接';}
  finally{resizeSending=false;updateResizeButtons();}
 }

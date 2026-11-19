@@ -1,7 +1,7 @@
 'use strict';
 // This panel represents remote icons in the page, not OS notifications. Server
 // text is assigned only as text; icon URLs are generated from our decoded PNGs.
-class OpenRDPNotifications {
+class RdpGoNotifications {
  constructor({request,generation,before,after}) {
   Object.assign(this,{request,generation,before,after});this.page=0;this.urls=[];this.entries=[];this.serial=0;this.lifecycle=0;this.pending=0;this.chain=Promise.resolve();this.last='';
   for(const [name,id] of Object.entries({root:'notify-tools',icons:'notify-icons',message:'notify-message',pageLabel:'notify-page',prev:'notify-prev',next:'notify-next',bubble:'notify-balloon',title:'notify-title',text:'notify-text',open:'notify-open',dismiss:'notify-dismiss'}))this[name]=document.getElementById(id);
@@ -28,7 +28,7 @@ class OpenRDPNotifications {
  async load(){
   if(!this.enabled||this.suspended)return;const serial=++this.serial,epoch=this.epoch;
   try{
-   const response=await this.request('/remoteapp/notifications?page='+this.page,{headers:{'X-OpenRDP-Generation':String(epoch)}});const data=await response.json();
+   const response=await this.request('/remoteapp/notifications?page='+this.page,{headers:{'X-RdpGo-Generation':String(epoch)}});const data=await response.json();
    if(serial!==this.serial||epoch!==this.epoch||!this.enabled||data.generation!==epoch)return;
    this.page=data.Page;this.last=epoch+':'+data.revision+':'+this.page;
    if(this.shown&&!data.entries.some(n=>this.key(n)===this.key(this.shown)&&n.info_serial===this.shown.info_serial))this.closeBalloon('balloon_hide');
@@ -68,9 +68,9 @@ class OpenRDPNotifications {
    try{
     if(!passive)await this.before?.();
     if(!this.enabled||lifecycle!==this.lifecycle||epoch!==this.epoch||epoch!==this.generation())return false;
-    const response=await this.request('/remoteapp/notify',{method:'POST',headers:{'Content-Type':'application/json','X-OpenRDP-Generation':String(epoch)},body:JSON.stringify({window:entry.window,id:entry.id,lifetime:entry.lifetime,revision:entry.revision,info_serial:entry.info_serial,action,balloon:dismiss?cycle.token:''})});
+    const response=await this.request('/remoteapp/notify',{method:'POST',headers:{'Content-Type':'application/json','X-RdpGo-Generation':String(epoch)},body:JSON.stringify({window:entry.window,id:entry.id,lifetime:entry.lifetime,revision:entry.revision,info_serial:entry.info_serial,action,balloon:dismiss?cycle.token:''})});
     if(action==='balloon_show'){
-     const token=response.headers.get('X-OpenRDP-Balloon');
+     const token=response.headers.get('X-RdpGo-Balloon');
      if(!cycle||!token||!/^[1-9][0-9]{0,19}$/.test(token))throw new Error('missing balloon token');
      cycle.token=token;
     }

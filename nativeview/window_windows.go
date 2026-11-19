@@ -34,48 +34,55 @@ type ownedRemote struct {
 func (r *ownedRemote) Close() error { r.once.Do(func() { r.err = r.Remote.Close() }); return r.err }
 
 type desktopWindow struct {
-	hwnd, font                       uintptr
-	ctx                              context.Context
-	remote                           Remote
-	adapter                          *ime.WindowsAdapter
-	input                            *ime.WindowsInput
-	dispatcher                       *ime.InputDispatcher
-	focus                            ime.TextFocus
-	loop                             *inputLoop
-	pointer                          *pointerWriter
-	keyCleanup                       *ime.DeliveryReceipt
-	pointerCleanup                   completion
-	mailbox                          desktopMailbox
-	desktop                          *desktopUpdate
-	rasterSource                     *desktopUpdate
-	rasterPoint                      image.Point
-	rasterPixels                     []byte
-	presentation                     ime.TextPresentation
-	candidates                       []ime.CandidateList
-	buttons                          []candidateButton
-	nativeUI                         *candidateInput
-	closing, blurRequested, captured bool
-	pressed                          [3]bool
-	lastPointer                      image.Point
-	pointerSerial                    uint64
-	serverPointer                    *image.Point
-	warpedClient                     *image.Point
-	awaitActivation                  bool
-	client                           image.Rectangle
-	textY, rowHeight                 int32
-	fontDPI                          uint32
-	dpiRect                          *winRect
-	status                           string
-	err                              error
-	lastPaint                        time.Time
-	barrier                          chan struct{}
+	hwnd, font                           uintptr
+	ctx                                  context.Context
+	remote                               Remote
+	adapter                              *ime.WindowsAdapter
+	input                                *ime.WindowsInput
+	dispatcher                           *ime.InputDispatcher
+	focus                                ime.TextFocus
+	loop                                 *inputLoop
+	packet                               *packetTranslation
+	packetSequence                       uintptr
+	pointer                              *pointerWriter
+	keyCleanup                           *ime.DeliveryReceipt
+	pointerCleanup                       completion
+	mailbox                              desktopMailbox
+	desktop                              *desktopUpdate
+	rasterSource                         *desktopUpdate
+	rasterPoint                          image.Point
+	rasterPixels                         []byte
+	presentation                         ime.TextPresentation
+	candidates                           []ime.CandidateList
+	buttons                              []candidateButton
+	nativeUI                             *candidateInput
+	closing, blurRequested, captured     bool
+	pressed                              [3]bool
+	lastPointer                          image.Point
+	pointerSerial                        uint64
+	serverPointer                        *image.Point
+	warpedClient                         *image.Point
+	awaitActivation                      bool
+	client                               image.Rectangle
+	textY, rowHeight                     int32
+	fontDPI                              uint32
+	dpiRect                              *winRect
+	fullscreen                           fullscreenState
+	shortcut                             fullscreenShortcut
+	toggleFullscreen, refitFullscreen    bool
+	fullscreenPressed                    bool
+	dynamicResolution, sizing, minimized bool
+	status                               string
+	err                                  error
+	lastPaint                            time.Time
+	barrier                              chan struct{}
 }
 
 // Run creates a Windows desktop window on a dedicated locked UI thread. It
 // presents one existing desktop session, local TSF preedit and candidate UI.
 // Closing/defocusing retires queued input and releases held keys/buttons to the
 // original connection. Run does not reconnect, launch RemoteApps, redirect
-// devices or change the negotiated resolution when the local window resizes.
+// devices. DynamicResolution optionally requests remote resolution changes.
 // Non-Windows platforms return ErrUnsupported without closing remote.
 func Run(ctx context.Context, remote Remote, options Options) error {
 	if ctx == nil || remote == nil {
@@ -95,13 +102,34 @@ func Run(ctx context.Context, remote Remote, options Options) error {
 	if info.Width == 0 || info.Height == 0 {
 		return ErrInvalid
 	}
+	if o.DynamicResolution && !remote.DynamicInfo().Managed {
+		return errors.New("nativeview: dynamic resolution requires managed dynamic channels")
+	}
+	channel, id, err := clipboardTransport(remote, o)
+	if err != nil {
+		return err
+	}
+	var clipboard *clipboardRemote
+	if channel != nil {
+		clipboard, err = openClipboardRemote(ctx, remote, channel, id, o)
+		if err != nil {
+			remote.Close()
+			return err
+		}
+		remote = clipboard
+	}
 	result := make(chan error, 1)
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		result <- runWindow(ctx, &ownedRemote{Remote: remote}, o)
 	}()
-	return <-result
+	err = <-result
+	if clipboard != nil {
+		clipboard.Close()
+		err = errors.Join(err, clipboard.wait())
+	}
+	return err
 }
 
 func runWindow(ctx context.Context, remote Remote, o Options) (err error) {
@@ -116,12 +144,12 @@ func runWindow(ctx context.Context, remote Remote, o Options) (err error) {
 		return nativeError("SetThreadDpiAwarenessContext", e)
 	}
 	defer setThreadDPI.Call(previous)
-	w := &desktopWindow{ctx: ctx, remote: remote, status: "Waiting for desktop"}
+	w := &desktopWindow{ctx: ctx, remote: remote, status: "Waiting for desktop", dynamicResolution: o.DynamicResolution}
 	if err = w.create(o); err != nil {
 		return err
 	}
 	defer w.destroy()
-	if w.adapter, err = ime.OpenWindowsWithOptions(w.hwnd, ime.WindowsOptions{StateBackend: ime.WindowsTSF}); err != nil {
+	if w.adapter, err = ime.OpenWindowsWithOptions(w.hwnd, ime.WindowsOptions{StateBackend: ime.WindowsTSF, UIElementOnly: o.LocalCandidateUI}); err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, w.adapter.Close()) }()
@@ -169,6 +197,12 @@ func runWindow(ctx context.Context, remote Remote, o Options) (err error) {
 	}
 	defer killTimer.Call(w.hwnd, 1)
 	showWindow.Call(w.hwnd, 1)
+	if o.Fullscreen {
+		w.toggleFullscreen = true
+		if err = w.applyWindowMode(); err != nil {
+			return err
+		}
+	}
 	updateWindow.Call(w.hwnd)
 	readerFinished := false
 	for {
@@ -200,21 +234,38 @@ func runWindow(ctx context.Context, remote Remote, o Options) (err error) {
 			}
 			return errors.Join(w.err, ctx.Err())
 		}
-		m, more, messageErr := w.adapter.GetMessage()
+		m, found, messageErr := w.nextMessage()
 		if messageErr != nil {
 			w.err = errors.Join(w.err, messageErr)
 			w.closing = true
 			w.retire()
 			return w.err
 		}
-		if !more {
+		if !found {
+			continue
+		}
+		if m.Message == 0x12 {
 			w.closing = true
 			continue
 		}
 		if m.HWND == w.hwnd {
+			if w.packetCharacter(m) {
+				continue
+			}
 			if key, isKey := m.KeyMessage(); isKey {
+				if !w.closing && !w.blurRequested && m.KeyboardValid {
+					if consume, toggle := w.shortcut.key(key, m.Keyboard); consume {
+						if toggle {
+							w.toggleFullscreen = !w.toggleFullscreen
+						}
+						continue
+					}
+				}
 				if w.loop != nil && !w.closing && !w.blurRequested && m.KeyboardValid {
-					if _, decodeErr := ime.DecodeWindowsKey(key); decodeErr == nil {
+					if key.WParam == 0xe7 {
+						message := m
+						w.enqueue(inputItem{key: key, state: m.Keyboard, packet: &message})
+					} else if _, decodeErr := ime.DecodeWindowsKey(key); decodeErr == nil {
 						w.enqueue(inputItem{key: key, state: m.Keyboard})
 					}
 				}
@@ -283,6 +334,21 @@ func windowProcedure(hwnd uintptr, message uint32, wp, lp uintptr) uintptr {
 		return v
 	}
 	switch message {
+	case packetBeginMarker:
+		if w.packet != nil && w.packet.sequence == wp {
+			w.packet.started = true
+		}
+		return 0
+	case packetMarker:
+		if w.packet != nil && w.packet.sequence == wp {
+			w.packet.done = true
+			w.packet = nil
+		}
+		return 0
+	case 0x102, 0x106, 0x109:
+		return w.character(message, wp, lp)
+	case 0x286: // TSF owns committed text; suppress legacy WM_IME_CHAR duplication.
+		return 0
 	case 0x10:
 		w.closing = true
 		return 0 // WM_CLOSE; teardown outside callbacks
@@ -298,8 +364,20 @@ func windowProcedure(hwnd uintptr, message uint32, wp, lp uintptr) uintptr {
 	case 0x215:
 		if w.captured && lp != hwnd {
 			w.captured = false
+			w.fullscreenPressed = false
 			w.blurRequested = true
 		}
+	case 0x7e: // WM_DISPLAYCHANGE: refit after a monitor topology change.
+		w.refitFullscreen = true
+	case 5: // WM_SIZE
+		w.minimized = wp == 1
+	case 0x231: // WM_ENTERSIZEMOVE
+		w.sizing = true
+		if w.dynamicResolution {
+			w.mailbox.requestDisplay(image.Point{}, time.Now())
+		}
+	case 0x232: // WM_EXITSIZEMOVE
+		w.sizing = false
 	case 0x2e0:
 		if lp != 0 {
 			var r winRect
@@ -348,6 +426,10 @@ func (w *desktopWindow) enqueue(item inputItem) {
 	}
 }
 func (w *desktopWindow) retire() {
+	if w.packet != nil {
+		w.packet.canceled = true
+		w.packet.characters = nil
+	}
 	if w.loop != nil {
 		w.loop = nil
 		r, err := w.input.BlurAsync(w.focus)
@@ -365,6 +447,8 @@ func (w *desktopWindow) retire() {
 		}
 	}
 	w.pressed = [3]bool{}
+	w.fullscreenPressed = false
+	w.shortcut = fullscreenShortcut{}
 	w.captured = false
 	releaseCapture.Call()
 	w.presentation = ime.TextPresentation{}
@@ -379,6 +463,19 @@ func (w *desktopWindow) step() error {
 		w.closing = true
 	}
 	if update := w.mailbox.take(); update != nil {
+		if update.retire != nil && update.display.phase == displayPreparing {
+			suspended, err := w.displaySuspended()
+			if err != nil {
+				return err
+			}
+			if suspended {
+				// Cancel this not-yet-sent plan without retiring active text.
+				w.mailbox.requestDisplay(image.Point{}, time.Now())
+				close(update.retire)
+				update.retire = nil
+				update.display.phase = displayIdle
+			}
+		}
 		if point, changed := consumePointerPosition(update, &w.pointerSerial); changed {
 			w.lastPointer = point
 			w.serverPointer = &point
@@ -395,8 +492,8 @@ func (w *desktopWindow) step() error {
 	}
 	foreground, _, _ := getForeground.Call()
 	focused, _, _ := getFocus.Call()
-	wants := foreground == w.hwnd && focused == w.hwnd && !w.closing && !w.awaitActivation && w.barrier == nil && w.desktop != nil && w.desktop.ready && w.desktop.info.Active && w.desktop.info.UnicodeInput
-	if w.loop != nil && (!wants || w.blurRequested) {
+	wants := foreground == w.hwnd && focused == w.hwnd && !w.closing && !w.awaitActivation && w.barrier == nil && w.desktop != nil && w.desktop.ready && w.desktop.info.Active && w.desktop.info.UnicodeInput && !w.desktop.display.busy()
+	if w.loop != nil && !wants || w.blurRequested {
 		w.retire()
 	}
 	if w.keyCleanup != nil {
@@ -446,15 +543,21 @@ func (w *desktopWindow) step() error {
 		w.barrier = nil
 		w.awaitActivation = false
 	}
-	if w.dpiRect != nil {
-		r := *w.dpiRect
-		w.dpiRect = nil
-		if validRect(r) {
-			setWindowPos.Call(w.hwnd, 0, signed(r.Left), signed(r.Top), signed(r.Right-r.Left), signed(r.Bottom-r.Top), 0x14)
-		}
+	if err := w.applyWindowMode(); err != nil {
+		return err
 	}
 	if err := w.geometry(); err != nil {
 		return err
+	}
+	if w.dynamicResolution {
+		// Composition and held input are allowed to finish before an automatic
+		// resize retires the input context. Candidate panel growth is not a new
+		// target, and interactive move/resize never floods the control channel.
+		suspended, err := w.displaySuspended()
+		if err != nil {
+			return err
+		}
+		w.mailbox.requestDisplay(displayTarget(w.client, w.rowHeight, suspended), time.Now())
 	}
 	if w.serverPointer != nil {
 		point := *w.serverPointer
@@ -465,7 +568,7 @@ func (w *desktopWindow) step() error {
 			}
 		}
 	}
-	if wants && w.loop == nil && w.keyCleanup == nil && w.pointerCleanup == nil {
+	if wants && w.loop == nil && w.keyCleanup == nil && w.pointerCleanup == nil && w.packet == nil {
 		token, err := w.input.Focus()
 		if busy(err) || errors.Is(err, ime.ErrNotFocused) {
 			return nil
@@ -476,7 +579,7 @@ func (w *desktopWindow) step() error {
 		w.focus = token
 		w.blurRequested = false
 		w.pointer = &pointerWriter{remote: w.remote}
-		w.loop = &inputLoop{host: w.input, token: token, sendMouse: w.pointer.submit}
+		w.loop = &inputLoop{host: w.input, token: token, sendMouse: w.pointer.submit, translatePacket: w.translatePacket}
 		var state ime.WindowsKeyboardState
 		ok, _, e := getKeyboardState.Call(uintptr(unsafe.Pointer(&state[0])))
 		if ok == 0 {
@@ -504,6 +607,11 @@ func (w *desktopWindow) step() error {
 			}
 		}
 		if err := w.loop.advance(w.ctx); err != nil {
+			if errors.Is(err, errCharacterInput) {
+				w.status = "Invalid Unicode input discarded; focus reset"
+				w.retire()
+				return nil
+			}
 			if onlyDeactivated(err) {
 				w.awaitActivation = true
 				w.status = "Waiting for desktop reactivation"

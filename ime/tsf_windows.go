@@ -338,7 +338,9 @@ type nativeVariant struct {
 	data     [2]uintptr
 }
 
-func readCompartment(p *comObject) (value uint32, err error) {
+// An unset compartment is distinct from a known zero value. Keep that absence
+// separate from COM/type/cleanup errors so Snapshot can still report a profile.
+func readCompartmentValue(p *comObject) (value uint32, present bool, err error) {
 	var v nativeVariant
 	hr := comCall(p, 4, uintptr(unsafe.Pointer(&v)))
 	defer func() {
@@ -348,15 +350,25 @@ func readCompartment(p *comObject) (value uint32, err error) {
 		}
 	}()
 	if int32(hr) < 0 {
-		return 0, hresult("GetValue", hr)
+		return 0, false, hresult("GetValue", hr)
 	}
 	if hr == 1 || v.kind == 0 {
-		return 0, ErrUnavailable
+		return 0, false, nil
 	}
 	if v.kind != 3 {
-		return 0, rail.ErrUnsupported
+		return 0, false, rail.ErrUnsupported
 	}
-	return uint32(v.data[0]), nil
+	return uint32(v.data[0]), true, nil
+}
+func readCompartment(p *comObject) (uint32, error) {
+	value, present, err := readCompartmentValue(p)
+	if err != nil {
+		return 0, err
+	}
+	if !present {
+		return 0, ErrUnavailable
+	}
+	return value, nil
 }
 func writeCompartment(p *comObject, clientID, value uint32) error {
 	v := nativeVariant{kind: 3}
@@ -368,15 +380,32 @@ func writeCompartment(p *comObject, clientID, value uint32) error {
 	return nil
 }
 func (w *tsfWatch) read() (rail.IMECompartment, error) {
+	value, known, err := w.readOptional()
+	if err != nil {
+		return rail.IMECompartment{}, err
+	}
+	if !known {
+		return rail.IMECompartment{}, ErrUnavailable
+	}
+	return value, nil
+}
+func (w *tsfWatch) readOptional() (rail.IMECompartment, bool, error) {
 	var values [3]uint32
+	known := true
 	for i, p := range w.compartments {
-		v, err := readCompartment(p)
+		v, present, err := readCompartmentValue(p)
 		if err != nil {
-			return rail.IMECompartment{}, err
+			return rail.IMECompartment{}, false, err
 		}
+		// Continue after an absent field: a later native failure must not be
+		// hidden by a profile-only snapshot.
+		known = known && present
 		values[i] = v
 	}
-	return rail.IMECompartment{Open: values[0] != 0, ConversionMode: rail.IMEConversionMode(values[1]), SentenceMode: rail.IMESentenceMode(values[2])}, nil
+	if !known {
+		return rail.IMECompartment{}, false, nil
+	}
+	return rail.IMECompartment{Open: values[0] != 0, ConversionMode: rail.IMEConversionMode(values[1]), SentenceMode: rail.IMESentenceMode(values[2])}, true, nil
 }
 
 // TakeChanges drains coalesced native hints. Call after the native callback has

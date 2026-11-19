@@ -41,9 +41,11 @@ const (
 	FileContentsNeeded
 	FileContentsResult
 	FileRetentionChanged
+	DataNeeded
 )
 
 type Event struct {
+	DataRequest *DataRequest // non-nil for a locally delayed DataNeeded
 	Files       *FileList
 	FileRequest *FileRequest
 	FileResult  *FileResult
@@ -63,10 +65,14 @@ type Status struct {
 }
 
 // Client's zero value is ready to receive server capabilities and Monitor Ready.
-// All methods require caller synchronization. Keep one client per connection.
+// All methods require caller synchronization. Keep one client per connection;
+// do not copy it after first use.
 // Initial synchronization advertises an empty clipboard. Nothing is requested
 // automatically or forwarded to a local clipboard. File streaming is opt-in.
 type Client struct {
+	delayed                               []Format
+	dataOwner                             *dataOwner
+	serving                               []*dataRequest
 	files                                 *fileState
 	ready, capsSeen, longNames            bool
 	offerPending, readPending             bool
@@ -80,7 +86,7 @@ type Client struct {
 }
 
 func (c *Client) Status() Status {
-	return Status{c.ready, c.offerPending || c.readPending, c.remoteText, c.localOwned, c.localAccepted, c.remoteVersion}
+	return Status{c.ready, c.offerPending || c.readPending || len(c.serving) != 0, c.remoteText, c.localOwned, c.localAccepted, c.remoteVersion}
 }
 
 func packet(typ, flags uint16, body []byte) []byte {
@@ -213,10 +219,7 @@ func (c *Client) Handle(b []byte) (replies [][]byte, event Event, err error) {
 		c.ready, c.offerPending = true, true
 		event.Kind = Ready
 	case 2:
-		if flags != 0 && flags != 4 {
-			return nil, event, ErrProtocol
-		}
-		list, err := parseFormats(body, c.longNames, flags == 4)
+		list, err := c.formatList(flags, body)
 		if err != nil {
 			return nil, event, err
 		}
@@ -228,9 +231,8 @@ func (c *Client) Handle(b []byte) (replies [][]byte, event Event, err error) {
 				c.remoteText = true
 			}
 		}
-		c.localOwned, c.localAccepted = false, false
-		c.clearLocal()
-		replies = [][]byte{packet(3, 1, nil)}
+		replies = c.RevokeLocal()
+		replies = append(replies, packet(3, 1, nil))
 		event.Kind = RemoteFormats
 	case 3:
 		if !c.offerPending || len(body) != 0 || (flags != 1 && flags != 2) {
@@ -250,8 +252,7 @@ func (c *Client) Handle(b []byte) (replies [][]byte, event Event, err error) {
 		}
 		c.offerLocal = false
 		if flags == 2 {
-			c.localOwned = false
-			c.clearLocal()
+			replies = c.RevokeLocal()
 			event.Err = ErrRejected
 		}
 	case 4:
@@ -259,6 +260,9 @@ func (c *Client) Handle(b []byte) (replies [][]byte, event Event, err error) {
 			return nil, event, ErrProtocol
 		}
 		id := binary.LittleEndian.Uint32(body)
+		if len(c.delayed) != 0 || len(c.serving) != 0 {
+			return c.requestDelayedData(id)
+		}
 		replies = [][]byte{packet(5, 2, nil)}
 		if c.localOwned {
 			for _, d := range c.local {

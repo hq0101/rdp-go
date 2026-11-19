@@ -35,7 +35,7 @@ func run(args []string) (runErr error) {
 	user := f.String("user", "", "account name")
 	domain := f.String("domain", "", "domain or computer name")
 	pin := f.String("cert-sha256", "", "verified server certificate SHA-256")
-	passwordEnv := f.String("password-env", "OPENRDP_PASSWORD", "local password environment variable")
+	passwordEnv := f.String("password-env", "RDPGO_PASSWORD", "local password environment variable")
 	redirectFile := f.String("redirection-config", "", "explicit local JSON hop plan; target credentials remain in memory until viewer exit")
 	ready := f.String("ready-file", "", "optional new JSON file for the local viewer URL")
 	appName := f.String("remote-app", "", "published RemoteApp alias (for example ||notepad) or server executable; starts once after the initial handshake")

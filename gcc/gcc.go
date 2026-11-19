@@ -160,7 +160,7 @@ func CreateRequestWithFlags(s ClientSettings, selected x224.Protocol, serverFlag
 		return nil, ErrInvalid
 	}
 	if s.ClientName == "" {
-		s.ClientName = "OPENRDP"
+		s.ClientName = "RDPGO"
 	}
 	name := utf16.Encode([]rune(s.ClientName))
 	if !utf8.ValidString(s.ClientName) || strings.ContainsRune(s.ClientName, 0) || len(name) > 15 {

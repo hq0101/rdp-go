@@ -10,6 +10,9 @@ func (*WindowsAdapter) GetMessage() (WindowsMessage, bool, error) {
 func (*WindowsAdapter) PeekMessage(bool) (WindowsMessage, bool, error) {
 	return WindowsMessage{}, false, rail.ErrUnsupported
 }
+func (*WindowsAdapter) PeekMaintenanceMessage() (WindowsMessage, bool, error) {
+	return WindowsMessage{}, false, rail.ErrUnsupported
+}
 func (*WindowsInput) KeyWithKeyboardState(TextFocus, WindowsKeyMessage, WindowsKeyboardState) (bool, error) {
 	return false, rail.ErrUnsupported
 }

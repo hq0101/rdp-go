@@ -637,7 +637,7 @@ func (v *viewer) serveRemoteApp(w http.ResponseWriter, r *http.Request) {
 	v.frameMu.Lock()
 	defer v.frameMu.Unlock()
 	a := v.app
-	if a == nil || !v.active || r.Header.Get("X-OpenRDP-Generation") != strconv.FormatUint(v.generation, 10) || !a.client.Status().Ready {
+	if a == nil || !v.active || r.Header.Get("X-RdpGo-Generation") != strconv.FormatUint(v.generation, 10) || !a.client.Status().Ready {
 		w.WriteHeader(409)
 		return
 	}
@@ -741,7 +741,7 @@ func (v *viewer) serveAppInputLocked(w http.ResponseWriter, r *http.Request, eve
 		w.WriteHeader(502)
 		return
 	}
-	if !onlyRelease && (r.Header.Get("X-OpenRDP-App-Revision") != v.app.presentedToken || v.app.presentedToken != v.appTokenLocked()) {
+	if !onlyRelease && (r.Header.Get("X-RdpGo-App-Revision") != v.app.presentedToken || v.app.presentedToken != v.appTokenLocked()) {
 		if err := v.sendAppInputLocked(ctx, input{Kind: "release"}); err != nil {
 			v.writeInterrupted("RemoteApp release failed")
 			w.WriteHeader(502)
@@ -755,7 +755,7 @@ func (v *viewer) serveAppInputLocked(w http.ResponseWriter, r *http.Request, eve
 		if err := v.sendAppInputLocked(ctx, event); err != nil {
 			if errors.Is(err, remoteapp.ErrStale) || errors.Is(err, remoteapp.ErrOutside) || errors.Is(err, remoteapp.ErrHidden) {
 				if index > 0 {
-					w.Header().Set("X-OpenRDP-Input-Partial", "1")
+					w.Header().Set("X-RdpGo-Input-Partial", "1")
 				}
 				http.Error(w, "choose a current remote window", 409)
 			} else if errors.Is(err, rdp.ErrUnsupportedOperation) {

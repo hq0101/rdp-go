@@ -323,7 +323,7 @@ func (v *viewer) runFileJob(j *fileJob) {
 	j.status.Files = len(plan.Entries())
 	j.status.Total = plan.TotalSize()
 	j.mu.Unlock()
-	root, result = os.MkdirTemp("", "openrdp-download-")
+	root, result = os.MkdirTemp("", "rdpgo-download-")
 	if result != nil {
 		return
 	}
@@ -463,12 +463,12 @@ func (w *archiveLimitWriter) Write(p []byte) (int, error) {
 }
 
 func (v *viewer) serveClipboardFiles(w http.ResponseWriter, r *http.Request) {
-	generation := r.Header.Get("X-OpenRDP-Generation")
+	generation := r.Header.Get("X-RdpGo-Generation")
 	if !v.clipboardGeneration(generation) {
 		clipboardError(w, errConnectionChanged)
 		return
 	}
-	w.Header().Set("X-OpenRDP-Generation", generation)
+	w.Header().Set("X-RdpGo-Generation", generation)
 	if r.URL.Path == "/clipboard/files/archive" {
 		v.serveFileArchive(w, r, generation)
 		return

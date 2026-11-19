@@ -146,7 +146,7 @@ func clientInfo(user, domain, password, address string, keyboardLayout uint32, e
 	b = binary.LittleEndian.AppendUint16(b, family)
 	b = binary.LittleEndian.AppendUint16(b, uint16(len(addr)))
 	b = append(b, addr...)
-	dir := append(utf16Bytes("openrdp"), 0, 0)
+	dir := append(utf16Bytes("rdpgo"), 0, 0)
 	b = binary.LittleEndian.AppendUint16(b, uint16(len(dir)))
 	b = append(b, dir...)
 	b = append(b, make([]byte, 172)...)

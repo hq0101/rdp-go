@@ -196,7 +196,7 @@ func licenseHashPart(h hash.Hash, b []byte) {
 }
 func licenseNamespace(address, user, domain string, cert [32]byte) [32]byte {
 	h := sha256.New()
-	h.Write([]byte("openrdp/license/namespace/v1\x00"))
+	h.Write([]byte("rdpgo/license/namespace/v1\x00"))
 	for _, s := range []string{address, user, domain} {
 		licenseHashPart(h, []byte(s))
 	}
